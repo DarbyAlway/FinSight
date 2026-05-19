@@ -1,0 +1,7 @@
+edgar
+yfinance
+gnews
+ollama
+matplotlib
+duckdb
+qdrant-client[fastembed]
