@@ -14,7 +14,7 @@ def test_init_db_creates_table():
 def test_is_cache_fresh_returns_false_when_empty():
     from main import init_db, is_cache_fresh
     init_db()
-    assert is_cache_fresh("AAPL") is False
+    assert is_cache_fresh("ZZZNOTREAL") is False
 
 
 def test_save_and_load_roundtrip():
