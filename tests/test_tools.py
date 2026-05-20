@@ -139,3 +139,45 @@ def test_search_news_returns_string():
     get_stock_news("AAPL", max_results=5)
     result = search_news("Apple revenue earnings", ticker="AAPL", top_k=3)
     assert isinstance(result, str) and len(result) > 0
+
+
+def test_init_db_creates_ticker_info_table():
+    from main import init_db, DB_PATH
+    init_db()
+    import duckdb
+    with duckdb.connect(DB_PATH) as con:
+        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+    assert "ticker_info" in tables
+
+
+def test_save_and_load_ticker_info():
+    from main import init_db, save_ticker_info, load_ticker_info
+    init_db()
+    save_ticker_info("AAPL", {"trailingPE": 36.2, "sector": "Technology", "longBusinessSummary": "Apple makes iPhones."})
+    result = load_ticker_info("AAPL")
+    assert result is not None
+    assert result["sector"] == "Technology"
+
+
+def test_ticker_info_cache_freshness():
+    from main import init_db, save_ticker_info, is_ticker_info_fresh
+    init_db()
+    save_ticker_info("MSFT", {"trailingPE": 30.0, "sector": "Technology", "longBusinessSummary": "Microsoft makes Windows."})
+    assert is_ticker_info_fresh("MSFT") is True
+    assert is_ticker_info_fresh("ZZZNOTREAL2") is False
+
+
+def test_company_profiles_collection_exists():
+    from main import init_qdrant, COMPANY_PROFILES_COLLECTION
+    client = init_qdrant()
+    names = [c.name for c in client.get_collections().collections]
+    assert COMPANY_PROFILES_COLLECTION in names
+
+
+def test_upsert_and_search_company_profile():
+    from main import init_qdrant, upsert_company_profile, search_company_profiles
+    client = init_qdrant()
+    upsert_company_profile(client, "AAPL", "Apple designs iPhones, Macs, and wearables.", "Technology", "Consumer Electronics")
+    results = search_company_profiles(client, "company that makes smartphones and wearables", top_k=3)
+    assert len(results) > 0
+    assert any(r["symbol"] == "AAPL" for r in results)

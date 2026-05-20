@@ -22,6 +22,8 @@ CACHE_TTL_DAYS = 90
 QDRANT_COLLECTION = "stock_news"
 DENSE_MODEL = "BAAI/bge-small-en-v1.5"
 SPARSE_MODEL = "Qdrant/bm25"
+COMPANY_PROFILES_COLLECTION = "company_profiles"
+TICKER_INFO_TTL_HOURS = 72
 
 SYSTEM_PROMPT = (
     "You are a stock analysis assistant. "
@@ -55,6 +57,17 @@ def init_db():
                 value       DOUBLE,
                 fetched_at  DOUBLE,
                 PRIMARY KEY (ticker, fiscal_year, section, line_item)
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS ticker_info (
+                symbol          VARCHAR PRIMARY KEY,
+                sector          VARCHAR,
+                industry        VARCHAR,
+                summary         VARCHAR,
+                summary_hash    VARCHAR,
+                info_json       VARCHAR,
+                cached_at       DOUBLE
             )
         """)
 
@@ -121,6 +134,53 @@ def fuzzy_query(ticker: str, line_item: str) -> list[dict]:
                 for r in rows
             ]
     return []
+
+
+def save_ticker_info(symbol: str, info: dict):
+    summary = info.get("longBusinessSummary", "")
+    summary_hash = hashlib.md5(summary.encode()).hexdigest()
+    with duckdb.connect(DB_PATH) as con:
+        con.execute("""
+            INSERT OR REPLACE INTO ticker_info
+                (symbol, sector, industry, summary, summary_hash, info_json, cached_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            symbol,
+            info.get("sector", ""),
+            info.get("industry", ""),
+            summary,
+            summary_hash,
+            json.dumps(info),
+            time.time(),
+        ))
+
+
+def load_ticker_info(symbol: str) -> dict | None:
+    with duckdb.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT info_json FROM ticker_info WHERE symbol = ?", (symbol,)
+        ).fetchone()
+    if row is None:
+        return None
+    return json.loads(row[0])
+
+
+def is_ticker_info_fresh(symbol: str) -> bool:
+    with duckdb.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT cached_at FROM ticker_info WHERE symbol = ?", (symbol,)
+        ).fetchone()
+    if row is None:
+        return False
+    return (time.time() - row[0]) / 3600 < TICKER_INFO_TTL_HOURS
+
+
+def get_summary_hash(symbol: str) -> str | None:
+    with duckdb.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT summary_hash FROM ticker_info WHERE symbol = ?", (symbol,)
+        ).fetchone()
+    return row[0] if row else None
 
 
 def parse_income_statement(ticker: str, raw: str) -> list[dict]:
@@ -293,6 +353,13 @@ def init_qdrant() -> QdrantClient:
                 )
             },
         )
+    if COMPANY_PROFILES_COLLECTION not in existing:
+        client.create_collection(
+            collection_name=COMPANY_PROFILES_COLLECTION,
+            vectors_config={
+                "dense": qmodels.VectorParams(size=384, distance=qmodels.Distance.COSINE)
+            },
+        )
     return client
 
 
@@ -447,6 +514,69 @@ def search_news(query: str, ticker: str = None, top_k: int = 10, days_back: int 
         return "\n".join(lines)
     except Exception as e:
         return f"Search error: {e}"
+
+
+def upsert_company_profile(client: QdrantClient, symbol: str, summary: str, sector: str, industry: str):
+    dense_enc, _ = _get_encoders()
+    vec = list(dense_enc.embed([summary]))[0].tolist()
+    point_id = int(hashlib.md5(symbol.encode()).hexdigest(), 16) % (2 ** 63)
+    client.upsert(
+        collection_name=COMPANY_PROFILES_COLLECTION,
+        points=[qmodels.PointStruct(
+            id=point_id,
+            vector={"dense": vec},
+            payload={"symbol": symbol, "sector": sector, "industry": industry, "summary": summary},
+        )],
+    )
+
+
+def search_company_profiles(client: QdrantClient, query: str, top_k: int = 5) -> list[dict]:
+    dense_enc, _ = _get_encoders()
+    q_vec = list(dense_enc.embed([query]))[0].tolist()
+    results = client.query_points(
+        collection_name=COMPANY_PROFILES_COLLECTION,
+        query=q_vec,
+        using="dense",
+        limit=top_k,
+    )
+    return [r.payload for r in results.points]
+
+
+def fetch_and_cache_company(symbol: str) -> dict | None:
+    try:
+        info = yf.Ticker(symbol).info
+        new_summary = info.get("longBusinessSummary", "")
+        new_hash = hashlib.md5(new_summary.encode()).hexdigest()
+        old_hash = get_summary_hash(symbol)
+        save_ticker_info(symbol, info)
+        if new_hash != old_hash and new_summary:
+            upsert_company_profile(
+                _get_qdrant(), symbol, new_summary,
+                info.get("sector", ""), info.get("industry", "")
+            )
+        return info
+    except Exception as e:
+        logging.warning("fetch_and_cache_company failed for %s: %s", symbol, e)
+        return None
+
+
+def get_company_info(symbol: str) -> str:
+    if not is_ticker_info_fresh(symbol):
+        fetch_and_cache_company(symbol)
+    info = load_ticker_info(symbol)
+    if not info:
+        return f"No company info found for {symbol}."
+    lines = [
+        f"{info.get('longName', symbol)} ({symbol})",
+        f"Sector: {info.get('sector','')} | Industry: {info.get('industry','')}",
+        f"Market Cap: ${info.get('marketCap',0):,.0f}",
+        f"P/E (trailing): {info.get('trailingPE','N/A')} | Forward P/E: {info.get('forwardPE','N/A')}",
+        f"Profit Margin: {info.get('profitMargins',0):.1%} | Gross Margin: {info.get('grossMargins',0):.1%}",
+        f"Debt/Equity: {info.get('debtToEquity','N/A')} | Beta: {info.get('beta','N/A')}",
+        f"Recommendation: {info.get('recommendationKey','N/A')} ({info.get('numberOfAnalystOpinions',0)} analysts)",
+        f"\n{info.get('longBusinessSummary','')}",
+    ]
+    return "\n".join(lines)
 
 
 init_db()
