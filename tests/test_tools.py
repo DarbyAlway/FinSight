@@ -99,3 +99,23 @@ def test_fuzzy_query_no_match_returns_empty():
          "line_item": "Products", "value": 200.0, "fetched_at": time.time()}
     ])
     assert fuzzy_query("FAKECO2", "zzznomatch") == []
+
+
+def test_init_qdrant_creates_collection():
+    from main import init_qdrant, QDRANT_COLLECTION
+    client = init_qdrant()
+    names = [c.name for c in client.get_collections().collections]
+    assert QDRANT_COLLECTION in names
+
+
+def test_store_and_search_articles():
+    from main import init_qdrant, store_articles, hybrid_search, QDRANT_COLLECTION
+    client = init_qdrant()
+    articles = [
+        {"ticker": "AAPL", "title": "Apple reports record iPhone sales",
+         "publisher": "Reuters", "link": "http://example.com/1", "source": "test"}
+    ]
+    store_articles(client, articles)
+    results = hybrid_search(client, "iPhone sales record", ticker="AAPL", top_k=5)
+    assert len(results) > 0
+    assert any("Apple" in r["title"] for r in results)
