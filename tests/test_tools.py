@@ -134,7 +134,7 @@ def test_get_stock_news_respects_max_results():
     assert len(lines) <= 6
 
 
-def test_search_news_returns_list():
+def test_search_news_returns_string():
     from main import get_stock_news, search_news
     get_stock_news("AAPL", max_results=5)
     result = search_news("Apple revenue earnings", ticker="AAPL", top_k=3)

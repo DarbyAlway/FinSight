@@ -1,7 +1,10 @@
 import hashlib
 import json
+import logging
 import re
 import time
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 
 import duckdb
 import matplotlib.pyplot as plt
@@ -354,9 +357,6 @@ def hybrid_search(client: QdrantClient, query: str, ticker: str = None, top_k: i
         return []
 
 
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
-
 _qdrant_client = None
 
 
@@ -372,7 +372,10 @@ def _parse_iso(date_str: str) -> float:
 
 
 def _parse_rfc2822(date_str: str) -> float:
-    return parsedate_to_datetime(date_str).timestamp()
+    try:
+        return parsedate_to_datetime(date_str).timestamp()
+    except Exception:
+        return time.time()
 
 
 def get_stock_news(ticker: str, max_results: int = 10) -> str:
@@ -396,8 +399,8 @@ def get_stock_news(ticker: str, max_results: int = 10) -> str:
                     "ticker": ticker, "title": title, "publisher": publisher,
                     "link": link, "source": "yfinance", "published_at": published_at,
                 })
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning("yfinance fetch failed for %s: %s", ticker, e)
 
     try:
         gn = GNews(max_results=max_results)
@@ -415,17 +418,18 @@ def get_stock_news(ticker: str, max_results: int = 10) -> str:
                     "ticker": ticker, "title": title, "publisher": publisher,
                     "link": link, "source": "gnews", "published_at": published_at,
                 })
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning("gnews fetch failed for %s: %s", ticker, e)
 
     try:
         store_articles(_get_qdrant(), articles_to_store)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning("Qdrant store failed for %s: %s", ticker, e)
 
     if not headlines:
         return f"No news found for {ticker}."
-    return f"Recent news for {ticker} ({len(headlines)} articles):\n" + "\n".join(headlines[:max_results])
+    displayed = headlines[:max_results]
+    return f"Recent news for {ticker} ({len(displayed)} articles):\n" + "\n".join(displayed)
 
 
 def search_news(query: str, ticker: str = None, top_k: int = 10, days_back: int = 30) -> str:
