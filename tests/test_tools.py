@@ -72,3 +72,30 @@ def test_parse_income_statement_section_tracking():
     products_rows = [r for r in rows if r["line_item"] == "Products"]
     assert len(products_rows) == 2
     assert products_rows[0]["section"] != products_rows[1]["section"]
+
+
+def test_get_income_statement_returns_string():
+    from main import get_income_statement
+    result = get_income_statement("AAPL")
+    assert isinstance(result, str) and len(result) > 0
+
+
+def test_fuzzy_query_finds_synonym():
+    from main import init_db, save_to_cache, fuzzy_query
+    init_db()
+    save_to_cache([
+        {"ticker": "FAKECO", "fiscal_year": "2025", "section": "Net sales",
+         "line_item": "Net sales", "value": 500.0, "fetched_at": time.time()}
+    ])
+    result = fuzzy_query("FAKECO", "revenue")
+    assert len(result) > 0 and result[0]["value"] == 500.0
+
+
+def test_fuzzy_query_no_match_returns_empty():
+    from main import init_db, save_to_cache, fuzzy_query
+    init_db()
+    save_to_cache([
+        {"ticker": "FAKECO2", "fiscal_year": "2025", "section": "Revenue",
+         "line_item": "Products", "value": 200.0, "fetched_at": time.time()}
+    ])
+    assert fuzzy_query("FAKECO2", "zzznomatch") == []

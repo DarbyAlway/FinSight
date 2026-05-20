@@ -180,4 +180,73 @@ def parse_income_statement(ticker: str, raw: str) -> list[dict]:
     return rows
 
 
+def get_income_statement(ticker: str) -> str:
+    try:
+        if is_cache_fresh(ticker):
+            return load_from_cache(ticker)
+        company = Company(ticker)
+        financials = company.get_financials()
+        raw = str(financials.income_statement())
+        rows = parse_income_statement(ticker, raw)
+        if rows:
+            save_to_cache(rows)
+            return load_from_cache(ticker)
+        return raw
+    except Exception as e:
+        return f"Error fetching income statement for {ticker}: {e}"
+
+
+def compare_tickers(tickers: list[str], line_item: str) -> str:
+    for ticker in tickers:
+        if not is_cache_fresh(ticker):
+            get_income_statement(ticker)
+
+    results = {t: fuzzy_query(t, line_item) for t in tickers}
+    all_years = sorted(
+        {r["fiscal_year"] for rows in results.values() for r in rows},
+        reverse=True
+    )
+
+    if not all_years:
+        lines = [f"No match found for '{line_item}'. Available line items:"]
+        for ticker in tickers:
+            with duckdb.connect(DB_PATH) as con:
+                items = [i[0] for i in con.execute(
+                    "SELECT DISTINCT line_item FROM income_statements WHERE ticker = ?",
+                    (ticker,)
+                ).fetchall()]
+            lines.append(f"  {ticker}: {', '.join(items[:10])}")
+        return "\n".join(lines)
+
+    x = range(len(all_years))
+    width = 0.8 / len(tickers)
+    fig, ax = plt.subplots(figsize=(10, 6))
+    for i, ticker in enumerate(tickers):
+        row_by_year = {r["fiscal_year"]: r["value"] for r in results.get(ticker, [])}
+        vals = [row_by_year.get(y, 0) for y in all_years]
+        offset = (i - len(tickers) / 2 + 0.5) * width
+        ax.bar([xi + offset for xi in x], vals, width, label=ticker)
+
+    matched_label = results[tickers[0]][0]["line_item"] if results.get(tickers[0]) else line_item
+    ax.set_title(f"{matched_label}: {' vs '.join(tickers)}")
+    ax.set_xlabel("Fiscal Year")
+    ax.set_ylabel("Value (millions)")
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(all_years)
+    ax.legend()
+    plt.tight_layout()
+    plt.show()
+
+    summary = [f"Comparison: '{line_item}' — {', '.join(tickers)}\n"]
+    for ticker in tickers:
+        rows = results.get(ticker, [])
+        if rows:
+            vals_str = ", ".join(f"{r['fiscal_year']}: ${r['value']:,.0f}M" for r in rows)
+            summary.append(f"  {ticker} (matched '{rows[0]['line_item']}'): {vals_str}")
+        else:
+            summary.append(f"  {ticker}: no match found")
+    summary.append("Chart displayed.")
+    return "\n".join(summary)
+
+
 init_db()
