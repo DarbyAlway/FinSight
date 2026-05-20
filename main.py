@@ -193,17 +193,26 @@ def get_income_statement(ticker: str) -> str:
             return load_from_cache(ticker)
         return raw
     except Exception as e:
+        stale = load_from_cache(ticker)
+        if stale:
+            return f"[Stale cache] {stale}\n(Refresh failed: {e})"
         return f"Error fetching income statement for {ticker}: {e}"
 
 
 def compare_tickers(tickers: list[str], line_item: str) -> str:
+    if not tickers:
+        return "No tickers provided."
+    fetch_errors = []
     for ticker in tickers:
         if not is_cache_fresh(ticker):
-            get_income_statement(ticker)
+            result = get_income_statement(ticker)
+            if result.startswith("Error"):
+                fetch_errors.append(f"{ticker}: {result}")
 
     results = {t: fuzzy_query(t, line_item) for t in tickers}
     all_years = sorted(
         {r["fiscal_year"] for rows in results.values() for r in rows},
+        key=lambda y: time.strptime(y, "%b %d, %Y"),
         reverse=True
     )
 
@@ -246,6 +255,8 @@ def compare_tickers(tickers: list[str], line_item: str) -> str:
         else:
             summary.append(f"  {ticker}: no match found")
     summary.append("Chart displayed.")
+    if fetch_errors:
+        summary.append("Fetch warnings: " + "; ".join(fetch_errors))
     return "\n".join(summary)
 
 
