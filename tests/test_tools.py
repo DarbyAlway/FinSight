@@ -119,3 +119,23 @@ def test_store_and_search_articles():
     results = hybrid_search(client, "iPhone sales record", ticker="AAPL", top_k=5)
     assert len(results) > 0
     assert any("Apple" in r["title"] for r in results)
+
+
+def test_get_stock_news_returns_string():
+    from main import get_stock_news
+    result = get_stock_news("AAPL")
+    assert isinstance(result, str) and len(result) > 0
+
+
+def test_get_stock_news_respects_max_results():
+    from main import get_stock_news
+    result = get_stock_news("AAPL", max_results=3)
+    lines = [l for l in result.split("\n") if l.strip().startswith("-")]
+    assert len(lines) <= 6
+
+
+def test_search_news_returns_list():
+    from main import get_stock_news, search_news
+    get_stock_news("AAPL", max_results=5)
+    result = search_news("Apple revenue earnings", ticker="AAPL", top_k=3)
+    assert isinstance(result, str) and len(result) > 0
