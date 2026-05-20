@@ -136,12 +136,13 @@ def parse_income_statement(ticker: str, raw: str) -> list[dict]:
     if not fiscal_years:
         return rows
 
+    # edgar Company.get_financials().income_statement() returns plain indented text with $ values
     dollar_re = re.compile(r'\$(\([\d,]+\)|[\d,]+)')
     current_section = "General"
 
     for line in raw.split('\n'):
         stripped = line.strip()
-        if not stripped or any(c in stripped for c in ('─', '━', '+', '=')):
+        if not stripped or re.match(r'^[─━+=\-\s]+$', stripped):
             continue
 
         # Update section from header lines (e.g. "Net sales:") before checking values
