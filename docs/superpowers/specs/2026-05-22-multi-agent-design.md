@@ -66,11 +66,13 @@ tests/
 }
 ```
 
-Valid agent values: `"financials"`, `"news"`, `"calc"`. If `agents` is empty `[]`, orchestrator answers directly from conversation context — no sub-agent calls.
+Valid agent values: `"financials"`, `"news"`, `"calc"`. If `agents` is empty `[]`, the orchestrator skips all sub-agents and answers the question directly in the synthesis call using only conversation context.
+
+**Direct-answer path:** The orchestrator answers without calling any sub-agent when the question is conversational or educational — e.g. "What is P/E ratio?", "Explain DCF to me", "Which metric is better for growth stocks?", or any follow-up that reasons over data already in the conversation. This is a deliberate first-class path, not a fallback — the planning call actively decides `agents: []` for these cases.
 
 **Fallback:** If plan JSON is malformed, keyword-match the user message to pick one agent (`income/revenue/P/E → financials`, `news/headline → news`, `DCF/CAGR/correlation → calc`).
 
-**Synthesis call** — input: conversation history + user question + all agent outputs. Output: final natural-language answer citing which agent/tool provided each fact.
+**Synthesis call** — input: conversation history + user question + all agent outputs (or empty if direct-answer path). Output: final natural-language answer. When agents were called, cites which agent/tool provided each fact.
 
 ---
 
@@ -203,7 +205,7 @@ def pytest_runtest_logreport(report):
 **`tests/test_orchestrator.py`** — mock `ollama.chat()` to return fixture plans and agent outputs. Must cover:
 1. Single-agent plan (news only)
 2. Multi-agent plan (financials → calc)
-3. No-agent plan (conversational question)
+3. Direct-answer plan (`agents: []`) — no sub-agents called, orchestrator answers from context
 4. Malformed JSON plan → keyword fallback
 5. Agent failure → skipped gracefully, synthesis continues
 
