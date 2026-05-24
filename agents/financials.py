@@ -18,7 +18,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_income_statement",
-            "description": "Fetch the latest 3-year annual income statement for a ticker from SEC 10-K filings.",
+            "description": "Fetch the latest 3-year annual income statement for a ticker from SEC 10-K filings. Use for: annual revenue, yearly profit, full-year earnings, 3-year income trends.",
             "parameters": {
                 "type": "object",
                 "properties": {"ticker": {"type": "string"}},
@@ -30,7 +30,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_quarterly_statement",
-            "description": "Fetch the last 4 quarters of income statement data for a ticker from SEC 10-Q filings.",
+            "description": "Fetch the last 4 quarters of income statement data for a ticker from SEC 10-Q filings. Use for: Q1/Q2/Q3/Q4 results, this quarter's earnings, quarterly breakdown, recent quarter.",
             "parameters": {
                 "type": "object",
                 "properties": {"ticker": {"type": "string"}},

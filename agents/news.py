@@ -16,7 +16,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_stock_news",
-            "description": "Fetch live news headlines for a ticker from Yahoo Finance and Google News.",
+            "description": "Fetch live news headlines for a ticker from Yahoo Finance and Google News. Use for: latest news, breaking headlines, fresh articles, what happened today/recently.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -31,7 +31,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_news",
-            "description": "Hybrid semantic+keyword search over stored news articles.",
+            "description": "Hybrid semantic+keyword search over stored news articles. Use for: searching past articles, thematic queries, finding news about a specific topic across stored results.",
             "parameters": {
                 "type": "object",
                 "properties": {
