@@ -52,3 +52,21 @@ def test_news_agent_returns_string():
 def test_news_agent_only_has_news_tools():
     from agents.news import TOOL_FUNCTIONS
     assert set(TOOL_FUNCTIONS.keys()) == {"get_stock_news", "search_news"}
+
+
+def test_calc_agent_returns_string():
+    from agents.calc import run as run_calc
+    with patch("agents.calc.ollama.chat", return_value=_make_ollama_response("AAPL revenue CAGR: 8.2%")):
+        result = run_calc("What is AAPL 3-year revenue CAGR?")
+    assert isinstance(result, str)
+    assert len(result) > 0
+
+
+def test_calc_agent_only_has_calc_tools():
+    from agents.calc import TOOL_FUNCTIONS
+    expected = {
+        "calculate_dcf", "calculate_peg", "calculate_pe_vs_sector",
+        "calculate_revenue_cagr", "calculate_margin_trend", "calculate_yoy",
+        "calculate_correlation", "rank_tickers", "get_price_history",
+    }
+    assert set(TOOL_FUNCTIONS.keys()) == expected
