@@ -15,3 +15,5 @@ SYNONYMS = {
     "cost of sales":    ["%cost of sales%", "%cost of revenue%", "%cost of goods%"],
     "eps":              ["%earnings per share%", "%diluted%"],
 }
+
+MODEL = "qwen3:14b"

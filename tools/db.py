@@ -6,6 +6,8 @@ import duckdb
 
 from tools.config import DB_PATH, CACHE_TTL_DAYS, TICKER_INFO_TTL_HOURS, SYNONYMS
 
+QUARTERLY_TTL_DAYS = 7
+
 
 def init_db():
     with duckdb.connect(DB_PATH) as con:
@@ -21,6 +23,17 @@ def init_db():
             )
         """)
         con.execute("""
+            CREATE TABLE IF NOT EXISTS quarterly_statements (
+                ticker        VARCHAR,
+                period_end    VARCHAR,
+                section       VARCHAR,
+                line_item     VARCHAR,
+                value         DOUBLE,
+                fetched_at    DOUBLE,
+                PRIMARY KEY (ticker, period_end, section, line_item)
+            )
+        """)
+        con.execute("""
             CREATE TABLE IF NOT EXISTS ticker_info (
                 symbol          VARCHAR PRIMARY KEY,
                 sector          VARCHAR,
@@ -29,6 +42,15 @@ def init_db():
                 summary_hash    VARCHAR,
                 info_json       VARCHAR,
                 cached_at       DOUBLE
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS price_history (
+                ticker     VARCHAR,
+                date       VARCHAR,
+                close      DOUBLE,
+                fetched_at DOUBLE,
+                PRIMARY KEY (ticker, date)
             )
         """)
 
@@ -142,3 +164,51 @@ def get_summary_hash(symbol: str) -> str | None:
             "SELECT summary_hash FROM ticker_info WHERE symbol = ?", (symbol,)
         ).fetchone()
     return row[0] if row else None
+
+
+def is_quarterly_cache_fresh(ticker: str) -> bool:
+    with duckdb.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT fetched_at FROM quarterly_statements WHERE ticker = ? ORDER BY fetched_at DESC LIMIT 1",
+            (ticker,)
+        ).fetchone()
+    if row is None:
+        return False
+    return (time.time() - row[0]) / 86400 < QUARTERLY_TTL_DAYS
+
+
+def save_quarterly_cache(rows: list[dict]):
+    if not rows:
+        return
+    with duckdb.connect(DB_PATH) as con:
+        con.executemany(
+            """INSERT OR REPLACE INTO quarterly_statements
+               (ticker, period_end, section, line_item, value, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            [(r["ticker"], r["period_end"], r["section"],
+              r["line_item"], r["value"], r["fetched_at"]) for r in rows],
+        )
+
+
+def load_quarterly_cache(ticker: str) -> str:
+    with duckdb.connect(DB_PATH) as con:
+        rows = con.execute(
+            "SELECT period_end, section, line_item, value FROM quarterly_statements "
+            "WHERE ticker = ? ORDER BY period_end DESC, section, line_item",
+            (ticker,)
+        ).fetchall()
+    if not rows:
+        return ""
+    lines = [f"{ticker} Quarterly Income Statement (cached)"]
+    current_period = None
+    current_section = None
+    for period_end, section, line_item, value in rows:
+        if period_end != current_period:
+            lines.append(f"\n  Period ending: {period_end}")
+            current_period = period_end
+            current_section = None
+        if section != current_section:
+            lines.append(f"    {section}")
+            current_section = section
+        lines.append(f"      {line_item}: ${value:,.1f}M")
+    return "\n".join(lines)
