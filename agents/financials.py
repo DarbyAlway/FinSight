@@ -6,12 +6,7 @@ import ollama
 from tools.config import MODEL
 from tools.income import get_income_statement, get_quarterly_statement
 from tools.company import get_company_info
-
-SYSTEM_PROMPT = (
-    "You are a financial data agent. Fetch and return structured financial facts for the requested ticker(s). "
-    "Do not interpret, advise, or add context beyond what the tools return. "
-    "Always cite the exact fiscal year and source filing for every figure."
-)
+from prompts import FINANCIALS_SYSTEM as SYSTEM_PROMPT
 
 TOOLS = [
     {
@@ -61,8 +56,10 @@ TOOL_FUNCTIONS = {
 OPT = {"temperature": 0.1}
 
 
-def run(user_question: str, context: str = "") -> str:
+def run(user_question: str, context: str = "", history: list[dict] | None = None) -> str:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if history:
+        messages += history[-6:]
     if context:
         messages += [
             {"role": "user", "content": f"Context from prior analysis:\n{context}"},

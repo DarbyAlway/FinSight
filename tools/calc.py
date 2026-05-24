@@ -228,12 +228,11 @@ def calculate_pe_vs_sector(ticker: str) -> str:
 
 def calculate_correlation(tickers: list[str], period: str = "1y") -> str:
     import pandas as pd
-    from tools.price import _is_price_fresh, get_price_history
+    from tools.price import get_price_history
     from tools.config import DB_PATH as _DB_PATH
 
     for ticker in tickers:
-        if not _is_price_fresh(ticker):
-            get_price_history(ticker, period)
+        get_price_history(ticker, period, force=True)
 
     frames: dict[str, pd.Series] = {}
     for ticker in tickers:

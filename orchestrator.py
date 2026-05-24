@@ -1,31 +1,31 @@
 import json
 import logging
+import os
 import re
+import time
 
 import ollama
+
+_FAILURE_LOG = os.path.join(os.path.dirname(__file__), "tests", "failure_log.jsonl")
+
+
+def _log_agent_error(agent_name: str, error: Exception):
+    entry = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+        "test": f"agent:{agent_name}",
+        "error": f"{type(error).__name__}: {error}",
+    }
+    try:
+        with open(_FAILURE_LOG, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError:
+        pass
 
 from tools.config import MODEL
 from agents.financials import run as run_financials
 from agents.news import run as run_news
 from agents.calc import run as run_calc
-
-PLAN_SYSTEM = (
-    "You are a stock analysis orchestrator. Given the user's question, output a JSON plan "
-    "with the agents to call and the tickers involved. "
-    "Available agents: 'financials' (income statements, company info), "
-    "'news' (headlines, news search), 'calc' (valuation ratios, growth metrics, portfolio analysis). "
-    "If the question is conversational or can be answered from conversation context alone, use agents=[]. "
-    "Respond with ONLY valid JSON in this format: "
-    '{"agents": ["financials"], "tickers": ["AAPL"], "reason": "one line"}'
-)
-
-SYNTHESIS_SYSTEM = (
-    "You are a stock analysis assistant. "
-    "Synthesise the agent outputs below into a clear, direct answer. "
-    "Cite which agent/tool provided each fact. "
-    "Only state facts that came from agent outputs. "
-    "If agent data is insufficient, say so rather than guessing."
-)
+from prompts import PLAN_SYSTEM, SYNTHESIS_SYSTEM
 
 OPT_PLAN = {"temperature": 0.0}
 OPT_SYNTH = {"temperature": 0.3}
@@ -34,9 +34,31 @@ OPT_SYNTH = {"temperature": 0.3}
 def _parse_plan(content: str) -> dict:
     content = content.strip()
     match = re.search(r'\{.*\}', content, re.DOTALL)
-    if match:
-        return json.loads(match.group())
-    return json.loads(content)
+    parsed = json.loads(match.group() if match else content)
+    if not isinstance(parsed, dict):
+        raise ValueError(f"Plan JSON is not an object: {type(parsed).__name__}")
+    return parsed
+
+
+_FINANCIAL_KEYWORDS = {
+    "revenue", "income", "earnings", "profit", "loss", "sales", "margin",
+    "cagr", "dcf", "peg", "valuation", "p/e", "pe ratio", "eps",
+    "news", "headline", "article", "filing", "10-k", "10-q",
+    "stock", "share", "price", "dividend", "sector", "analyst",
+    "correlation", "rank", "compare", "quarterly", "annual",
+}
+
+import re as _re
+_TICKER_RE = _re.compile(r'\b[A-Z]{1,5}\b')
+
+
+def _is_conversational(question: str) -> bool:
+    q = question.lower()
+    if any(kw in q for kw in _FINANCIAL_KEYWORDS):
+        return False
+    if _TICKER_RE.search(question):
+        return False
+    return True
 
 
 def _keyword_fallback(question: str) -> list[str]:
@@ -58,15 +80,20 @@ def process_turn(
         *messages,
         {"role": "user", "content": user_input},
     ]
-    plan_response = ollama.chat(model=MODEL, messages=planning_messages, options=OPT_PLAN)
-    plan_content = plan_response.message.content or ""
-
-    try:
-        plan = _parse_plan(plan_content)
-        agents_to_run: list[str] = plan.get("agents", [])
-    except (json.JSONDecodeError, ValueError):
-        logging.warning("Orchestrator plan JSON malformed — using keyword fallback")
-        agents_to_run = _keyword_fallback(user_input)
+    t0 = time.time()
+    if _is_conversational(user_input):
+        agents_to_run = []
+        logging.info("[timing] plan call: skipped (conversational)")
+    else:
+        plan_response = ollama.chat(model=MODEL, messages=planning_messages, options=OPT_PLAN)
+        plan_content = plan_response.message.content or ""
+        logging.info("[timing] plan call: %.2fs", time.time() - t0)
+        try:
+            plan = _parse_plan(plan_content)
+            agents_to_run: list[str] = plan.get("agents", [])
+        except (json.JSONDecodeError, ValueError):
+            logging.warning("Orchestrator plan JSON malformed — using keyword fallback")
+            agents_to_run = _keyword_fallback(user_input)
 
     accumulated_context = ""
     agent_map = {
@@ -80,11 +107,13 @@ def process_turn(
         if fn is None:
             continue
         try:
-            result = fn(user_input, accumulated_context)
+            t1 = time.time()
+            result = fn(user_input, accumulated_context, history=messages)
             accumulated_context += f"\n\n[{agent_name.upper()} AGENT]\n{result}"
-            logging.info("Orchestrator: %s agent completed", agent_name)
+            logging.info("[timing] %s agent: %.2fs", agent_name, time.time() - t1)
         except Exception as e:
             logging.warning("Orchestrator: %s agent failed — %s", agent_name, e)
+            _log_agent_error(agent_name, e)
 
     synthesis_system = persona_system or SYNTHESIS_SYSTEM
     synthesis_messages = [{"role": "system", "content": synthesis_system}, *messages]
@@ -99,8 +128,11 @@ def process_turn(
             ),
         })
 
+    t2 = time.time()
     synthesis_response = ollama.chat(model=MODEL, messages=synthesis_messages, options=OPT_SYNTH)
     answer = synthesis_response.message.content or ""
+    logging.info("[timing] synthesis call: %.2fs", time.time() - t2)
+    logging.info("[timing] total turn: %.2fs", time.time() - t0)
 
     updated_messages = messages + [
         {"role": "user", "content": user_input},

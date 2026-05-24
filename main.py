@@ -10,7 +10,8 @@ from tools.config import MODEL
 from tools.db import init_db
 from tools.vector import init_qdrant
 from tools.search_guardrails import _get_anchor_vecs, web_search_fallback, is_uncertain
-from orchestrator import process_turn, SYNTHESIS_SYSTEM
+from orchestrator import process_turn
+from prompts import SYNTHESIS_SYSTEM, PERSONAS, PANEL_PROMPT
 
 # Re-exports for tests/test_tools.py compatibility
 from tools.db import (
@@ -35,39 +36,6 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-PERSONAS = {
-    "buffett": (
-        "Warren Buffett",
-        "Respond as Warren Buffett. Focus on intrinsic value, competitive moats, long-term holding, "
-        "and margin of safety. Use plain folksy language. Be skeptical of high-P/E growth stocks.",
-    ),
-    "munger": (
-        "Charlie Munger",
-        "Respond as Charlie Munger. Apply mental models, invert problems, and be blunt. "
-        "Emphasize business quality and rational thinking over clever financial engineering.",
-    ),
-    "lynch": (
-        "Peter Lynch",
-        "Respond as Peter Lynch. Focus on growth at a reasonable price (GARP) and PEG ratio. "
-        "Be optimistic and practical. Look for ten-baggers in everyday businesses people understand.",
-    ),
-    "dalio": (
-        "Ray Dalio",
-        "Respond as Ray Dalio. Think in macro cycles, debt cycles, and risk parity. "
-        "Emphasize diversification, correlation, and understanding the economy as a machine.",
-    ),
-    "wood": (
-        "Cathie Wood",
-        "Respond as Cathie Wood. Focus on disruptive innovation and exponential growth curves. "
-        "Be bullish on AI, genomics, and fintech. Think in 5-year price targets.",
-    ),
-}
-
-PANEL_PROMPT = (
-    "You are a panel of five famous investors: Warren Buffett, Charlie Munger, Peter Lynch, "
-    "Ray Dalio, and Cathie Wood. For every question give a SHORT response from each investor "
-    "labeled with their name, reflecting their known philosophy and speaking style."
-)
 
 
 def _build_persona_system(persona_key: str | None) -> str | None:

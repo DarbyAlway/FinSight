@@ -5,11 +5,7 @@ import ollama
 
 from tools.config import MODEL
 from tools.news import get_stock_news, search_news
-
-SYSTEM_PROMPT = (
-    "You are a news retrieval agent. Fetch and summarise news for the requested ticker(s). "
-    "Always cite the publisher, headline, and publication date for every item."
-)
+from prompts import NEWS_SYSTEM as SYSTEM_PROMPT
 
 TOOLS = [
     {
@@ -54,8 +50,10 @@ TOOL_FUNCTIONS = {
 OPT = {"temperature": 0.1}
 
 
-def run(user_question: str, context: str = "") -> str:
+def run(user_question: str, context: str = "", history: list[dict] | None = None) -> str:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if history:
+        messages += history[-6:]
     if context:
         messages += [
             {"role": "user", "content": f"Context from prior analysis:\n{context}"},

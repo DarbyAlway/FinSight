@@ -10,13 +10,7 @@ from tools.calc import (
     calculate_correlation, rank_tickers,
 )
 from tools.price import get_price_history
-
-SYSTEM_PROMPT = (
-    "You are a financial calculation agent. Compute stock metrics using your tools. "
-    "Always show the assumptions you used (e.g. discount rate, growth rate). "
-    "If data is missing, return the error string from the tool — do not guess. "
-    "Do not re-fetch data that is already present in the context you received."
-)
+from prompts import CALC_SYSTEM as SYSTEM_PROMPT
 
 TOOLS = [
     {"type": "function", "function": {"name": "calculate_revenue_cagr", "description": "Calculate revenue CAGR for a ticker.", "parameters": {"type": "object", "properties": {"ticker": {"type": "string"}, "years": {"type": "integer"}}, "required": ["ticker"]}}},
@@ -46,8 +40,10 @@ TOOL_FUNCTIONS = {
 OPT = {"temperature": 0.1}
 
 
-def run(user_question: str, context: str = "") -> str:
+def run(user_question: str, context: str = "", history: list[dict] | None = None) -> str:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if history:
+        messages += history[-6:]
     if context:
         messages += [
             {"role": "user", "content": f"Context from prior analysis:\n{context}"},

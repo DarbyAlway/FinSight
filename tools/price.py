@@ -27,8 +27,8 @@ def _load_price_rows(ticker: str) -> list[tuple]:
         ).fetchall()
 
 
-def get_price_history(ticker: str, period: str = "1y") -> str:
-    if not _is_price_fresh(ticker):
+def get_price_history(ticker: str, period: str = "1y", force: bool = False) -> str:
+    if force or not _is_price_fresh(ticker):
         try:
             hist = yf.Ticker(ticker).history(period=period)
             if hist.empty:
