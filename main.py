@@ -1,164 +1,89 @@
-import json
-import subprocess
+import logging
+import os
 
-import ollama
+from dotenv import load_dotenv
+load_dotenv()
+
 from edgar import set_identity
 
-from tools.config import *
+from tools.config import MODEL
 from tools.db import init_db
-from tools.income import get_income_statement, compare_tickers, parse_income_statement
-from tools.news import get_stock_news, search_news
-from tools.company import get_company_info
-from tools.vector import (
-    init_qdrant, store_articles, hybrid_search,
-    upsert_company_profile, search_company_profiles,
-)
+from tools.vector import init_qdrant
+from tools.search_guardrails import _get_anchor_vecs, web_search_fallback, is_uncertain
+from orchestrator import process_turn, SYNTHESIS_SYSTEM
+
+# Re-exports for tests/test_tools.py compatibility
 from tools.db import (
     is_cache_fresh, save_to_cache, load_from_cache, fuzzy_query,
     save_ticker_info, load_ticker_info, is_ticker_info_fresh, get_summary_hash,
+    is_quarterly_cache_fresh, save_quarterly_cache, load_quarterly_cache,
 )
+from tools.income import parse_income_statement, get_income_statement, get_quarterly_statement
+from tools.vector import (
+    init_qdrant,  # noqa: F811 — re-export for test_tools.py
+    store_articles, hybrid_search, upsert_company_profile, search_company_profiles,
+)
+from tools.news import get_stock_news, search_news
+from tools.company import get_company_info
+from tools.config import DB_PATH, QDRANT_COLLECTION, COMPANY_PROFILES_COLLECTION
 
 set_identity("yourname@email.com")
 
-MODEL = "qwen3:30b-a3b"
-
-SYSTEM_PROMPT = (
-    "You are a stock analysis assistant. "
-    "You have five tools: get_income_statement (SEC 10-K financial data), "
-    "get_stock_news (fetch and store recent headlines), "
-    "search_news (hybrid semantic+keyword search over stored news), "
-    "compare_tickers (compare a financial metric across tickers with a chart), "
-    "and get_company_info (company profile, sector, and key financial ratios). "
-    "Use tools when the user asks about stocks. "
-    "Always cite key figures and mention which tool you used. "
-    "If you cannot answer and have no suitable tool, say so clearly."
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
 )
 
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_income_statement",
-            "description": "Fetch the latest 3-year income statement for a single ticker from SEC filings.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "ticker": {"type": "string", "description": "Stock ticker, e.g. AAPL"}
-                },
-                "required": ["ticker"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_stock_news",
-            "description": "Fetch recent news for a ticker from Yahoo Finance and Google News. Also stores articles for later search.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "ticker": {"type": "string", "description": "Stock ticker, e.g. AAPL"},
-                    "max_results": {"type": "integer", "description": "Max results per source (default 10)"},
-                },
-                "required": ["ticker"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_news",
-            "description": (
-                "Hybrid semantic+keyword search over all stored news articles. "
-                "Use for thematic queries like 'iPhone supply chain' or 'rate hike impact'. "
-                "Optionally filter by ticker."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query"},
-                    "ticker": {"type": "string", "description": "Optional ticker filter"},
-                    "top_k": {"type": "integer", "description": "Number of results (default 10)"},
-                    "days_back": {"type": "integer", "description": "Only return articles within this many days (default 30)"},
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "compare_tickers",
-            "description": "Compare a financial metric across multiple tickers. Opens a bar chart.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "tickers": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "List of tickers, e.g. ['AAPL', 'MSFT']",
-                    },
-                    "line_item": {
-                        "type": "string",
-                        "description": "Metric to compare, e.g. 'revenue', 'net income', 'r&d'",
-                    },
-                },
-                "required": ["tickers", "line_item"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_company_info",
-            "description": (
-                "Get company profile, sector, key financial ratios (P/E, margins, debt/equity), "
-                "and business description for a ticker. Use for 'what does X do?' or 'what sector is X in?' queries. "
-                "Data is cached for 72 hours."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "symbol": {"type": "string", "description": "Stock ticker, e.g. AAPL"}
-                },
-                "required": ["symbol"],
-            },
-        },
-    },
-]
-
-TOOL_FUNCTIONS = {
-    "get_income_statement": get_income_statement,
-    "get_stock_news": get_stock_news,
-    "search_news": search_news,
-    "compare_tickers": compare_tickers,
-    "get_company_info": get_company_info,
+PERSONAS = {
+    "buffett": (
+        "Warren Buffett",
+        "Respond as Warren Buffett. Focus on intrinsic value, competitive moats, long-term holding, "
+        "and margin of safety. Use plain folksy language. Be skeptical of high-P/E growth stocks.",
+    ),
+    "munger": (
+        "Charlie Munger",
+        "Respond as Charlie Munger. Apply mental models, invert problems, and be blunt. "
+        "Emphasize business quality and rational thinking over clever financial engineering.",
+    ),
+    "lynch": (
+        "Peter Lynch",
+        "Respond as Peter Lynch. Focus on growth at a reasonable price (GARP) and PEG ratio. "
+        "Be optimistic and practical. Look for ten-baggers in everyday businesses people understand.",
+    ),
+    "dalio": (
+        "Ray Dalio",
+        "Respond as Ray Dalio. Think in macro cycles, debt cycles, and risk parity. "
+        "Emphasize diversification, correlation, and understanding the economy as a machine.",
+    ),
+    "wood": (
+        "Cathie Wood",
+        "Respond as Cathie Wood. Focus on disruptive innovation and exponential growth curves. "
+        "Be bullish on AI, genomics, and fintech. Think in 5-year price targets.",
+    ),
 }
 
-
-def dispatch_tool(tool_call) -> str:
-    name = tool_call.function.name
-    args = json.loads(tool_call.function.arguments)
-    fn = TOOL_FUNCTIONS.get(name)
-    if fn is None:
-        return f"Unknown tool: {name}"
-    return fn(**args)
+PANEL_PROMPT = (
+    "You are a panel of five famous investors: Warren Buffett, Charlie Munger, Peter Lynch, "
+    "Ray Dalio, and Cathie Wood. For every question give a SHORT response from each investor "
+    "labeled with their name, reflecting their known philosophy and speaking style."
+)
 
 
-def web_search_fallback(query: str) -> str:
-    try:
-        result = subprocess.run(
-            ["npx", "-y", "@modelcontextprotocol/server-brave-search"],
-            input=query, capture_output=True, text=True, timeout=15
-        )
-        return result.stdout.strip() or f"No web results found for: {query}"
-    except Exception as e:
-        return f"Web search unavailable: {e}"
+def _build_persona_system(persona_key: str | None) -> str | None:
+    if persona_key == "panel":
+        return SYNTHESIS_SYSTEM + " " + PANEL_PROMPT
+    if persona_key and persona_key in PERSONAS:
+        return SYNTHESIS_SYSTEM + " " + PERSONAS[persona_key][1]
+    return None
 
 
 def chat():
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    print(f"Stock Assistant ({MODEL}) — type 'exit' to quit\n")
+    persona: str | None = None
+    messages: list[dict] = []
+    names = ", ".join(PERSONAS.keys())
+    print(f"Stock Assistant ({MODEL}) — type 'exit' to quit")
+    print(f"Personas: /persona <{names}|panel|off>\n")
 
     while True:
         user_input = input("You: ").strip()
@@ -167,33 +92,26 @@ def chat():
         if not user_input:
             continue
 
-        messages.append({"role": "user", "content": user_input})
-        response = ollama.chat(model=MODEL, messages=messages, tools=TOOLS)
-        msg = response.message
+        if user_input.startswith("/persona"):
+            parts = user_input.split()
+            key = parts[1].lower() if len(parts) > 1 else "off"
+            if key == "off":
+                persona = None
+                print("[Persona off — back to default]\n")
+            elif key in ("panel", *PERSONAS):
+                persona = key
+                label = "investor panel" if key == "panel" else PERSONAS[key][0]
+                print(f"[Persona: {label}]\n")
+            else:
+                print(f"[Unknown persona '{key}'. Available: {names}, panel, off]\n")
+            continue
 
-        tool_was_called = False
-        while msg.tool_calls:
-            tool_was_called = True
-            messages.append(msg)
-            for tool_call in msg.tool_calls:
-                result = dispatch_tool(tool_call)
-                messages.append({"role": "tool", "content": result})
-            response = ollama.chat(model=MODEL, messages=messages, tools=TOOLS)
-            msg = response.message
-
-        uncertain_phrases = ("i don't know", "i'm not sure", "i cannot", "no information", "not available")
-        if not tool_was_called and any(p in (msg.content or "").lower() for p in uncertain_phrases):
-            web_result = web_search_fallback(user_input)
-            messages.append({"role": "user", "content": f"[Web search result]: {web_result}\nPlease answer based on the above."})
-            response = ollama.chat(model=MODEL, messages=messages)
-            msg = response.message
-
-        messages.append({"role": "assistant", "content": msg.content or ""})
-        print(f"\nAssistant: {msg.content or ''}\n")
+        answer, messages = process_turn(user_input, messages, _build_persona_system(persona))
+        print(f"\nAssistant: {answer}\n")
 
 
 if __name__ == "__main__":
+    init_db()
+    init_qdrant()
+    _get_anchor_vecs()
     chat()
-
-
-init_db()
