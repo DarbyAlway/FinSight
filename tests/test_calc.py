@@ -155,3 +155,59 @@ def test_calculate_dcf_missing_operating_income():
     from tools.calc import calculate_dcf
     result = calculate_dcf("ZZZNO_OP_INC")
     assert "ERROR" in result
+
+
+def test_calculate_pe_vs_sector_returns_comparison():
+    from tools.calc import calculate_pe_vs_sector
+    save_ticker_info("SECCO", {
+        "trailingPE": 25.0,
+        "sector": "Technology",
+        "longBusinessSummary": "Sector test company.",
+    })
+    result = calculate_pe_vs_sector("SECCO")
+    assert "SECCO" in result
+    assert "P/E" in result or "sector" in result.lower()
+
+
+def test_calculate_pe_vs_sector_no_pe():
+    from tools.calc import calculate_pe_vs_sector
+    save_ticker_info("NOPESEC", {
+        "sector": "Technology",
+        "longBusinessSummary": "No PE.",
+    })
+    result = calculate_pe_vs_sector("NOPESEC")
+    assert "ERROR" in result or "unavailable" in result.lower()
+
+
+def test_calculate_correlation_returns_matrix(monkeypatch):
+    from tools.calc import calculate_correlation
+    import tools.price as price_mod
+    _seed_price("CORA", [
+        ("CORA", "2025-01-01", 100.0, time.time()),
+        ("CORA", "2025-01-02", 102.0, time.time()),
+        ("CORA", "2025-01-03", 101.0, time.time()),
+        ("CORA", "2025-01-04", 104.0, time.time()),
+        ("CORA", "2025-01-05", 103.0, time.time()),
+    ])
+    _seed_price("CORB", [
+        ("CORB", "2025-01-01", 50.0, time.time()),
+        ("CORB", "2025-01-02", 51.0, time.time()),
+        ("CORB", "2025-01-03", 49.0, time.time()),
+        ("CORB", "2025-01-04", 52.0, time.time()),
+        ("CORB", "2025-01-05", 51.0, time.time()),
+    ])
+    monkeypatch.setattr(price_mod, "_is_price_fresh", lambda t: True)
+    result = calculate_correlation(["CORA", "CORB"])
+    assert "CORA" in result and "CORB" in result
+    assert "correlation" in result.lower() or "vs" in result.lower()
+
+
+def test_rank_tickers_returns_sorted_list():
+    from tools.calc import rank_tickers
+    _seed_income("RANKA", [("Sep 28, 2024", "Net sales", "Net sales", 500_000.0)])
+    _seed_income("RANKB", [("Sep 28, 2024", "Net sales", "Net sales", 300_000.0)])
+    _seed_income("RANKC", [("Sep 28, 2024", "Net sales", "Net sales", 700_000.0)])
+    result = rank_tickers(["RANKA", "RANKB", "RANKC"], "revenue")
+    assert "RANKC" in result
+    assert "RANKA" in result
+    assert result.index("RANKC") < result.index("RANKA") < result.index("RANKB")

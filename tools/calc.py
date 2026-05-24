@@ -176,3 +176,123 @@ def calculate_dcf(
         lines.append("  Intrinsic value per share: N/A (shares outstanding unavailable)")
     lines.append("  Note: Uses operating income as FCF proxy. Treat as directional estimate only.")
     return "\n".join(lines)
+
+
+SECTOR_PEERS: dict[str, list[str]] = {
+    "Technology": ["AAPL", "MSFT", "GOOGL", "META", "NVDA"],
+    "Consumer Cyclical": ["AMZN", "TSLA", "HD", "NKE", "MCD"],
+    "Healthcare": ["JNJ", "UNH", "PFE", "ABBV", "MRK"],
+    "Financial Services": ["JPM", "BAC", "WFC", "GS", "MS"],
+    "Communication Services": ["GOOGL", "META", "NFLX", "DIS", "T"],
+    "Industrials": ["HON", "UPS", "CAT", "BA", "GE"],
+    "Consumer Defensive": ["WMT", "PG", "KO", "PEP", "COST"],
+    "Energy": ["XOM", "CVX", "COP", "SLB", "EOG"],
+    "Utilities": ["NEE", "DUK", "SO", "AEP", "EXC"],
+    "Real Estate": ["AMT", "PLD", "CCI", "EQIX", "PSA"],
+    "Basic Materials": ["LIN", "APD", "ECL", "SHW", "FCX"],
+}
+
+
+def calculate_pe_vs_sector(ticker: str) -> str:
+    info = load_ticker_info(ticker)
+    if not info:
+        return f"ERROR: No company info for {ticker} — call get_company_info first."
+    pe = info.get("trailingPE")
+    if not pe or not isinstance(pe, (int, float)):
+        return f"ERROR: P/E ratio unavailable for {ticker}."
+    sector = info.get("sector", "")
+    peers = [t for t in SECTOR_PEERS.get(sector, []) if t != ticker][:5]
+    if not peers:
+        return (
+            f"{ticker} P/E: {pe:.1f} | Sector: {sector}\n"
+            f"  No peer benchmark available for sector '{sector}'."
+        )
+    peer_pes: list[float] = []
+    lines = [f"{ticker} P/E vs {sector} Sector Peers:"]
+    lines.append(f"  {ticker}: {pe:.1f} (subject)")
+    for peer in peers:
+        peer_info = load_ticker_info(peer)
+        if not peer_info:
+            from tools.company import fetch_and_cache_company
+            peer_info = fetch_and_cache_company(peer) or {}
+        peer_pe = peer_info.get("trailingPE")
+        if peer_pe and isinstance(peer_pe, (int, float)):
+            peer_pes.append(peer_pe)
+            lines.append(f"  {peer}: {peer_pe:.1f}")
+    if peer_pes:
+        avg_pe = sum(peer_pes) / len(peer_pes)
+        diff = pe - avg_pe
+        lines.append(f"  Peer avg P/E: {avg_pe:.1f}  |  {ticker} is {diff:+.1f} vs peers")
+    return "\n".join(lines)
+
+
+def calculate_correlation(tickers: list[str], period: str = "1y") -> str:
+    import pandas as pd
+    from tools.price import _is_price_fresh, get_price_history
+    from tools.config import DB_PATH as _DB_PATH
+
+    for ticker in tickers:
+        if not _is_price_fresh(ticker):
+            get_price_history(ticker, period)
+
+    frames: dict[str, pd.Series] = {}
+    for ticker in tickers:
+        with duckdb.connect(_DB_PATH) as con:
+            rows = con.execute(
+                "SELECT date, close FROM price_history WHERE ticker = ? ORDER BY date",
+                (ticker,)
+            ).fetchall()
+        if rows:
+            dates, closes = zip(*rows)
+            frames[ticker] = pd.Series(list(closes), index=list(dates), dtype=float)
+
+    if len(frames) < 2:
+        return f"ERROR: Need at least 2 tickers with price data. Got: {list(frames.keys())}"
+
+    df = pd.DataFrame(frames).dropna()
+    returns = df.pct_change().dropna()
+    corr = returns.corr()
+
+    lines = [f"Price Return Correlation ({period}):"]
+    for i, t1 in enumerate(tickers):
+        for t2 in tickers[i + 1:]:
+            if t1 in corr.columns and t2 in corr.columns:
+                val = corr.loc[t1, t2]
+                label = (
+                    "strongly positive" if val > 0.7
+                    else "weakly positive" if val > 0.3
+                    else "neutral" if val > -0.3
+                    else "weakly negative" if val > -0.7
+                    else "strongly negative"
+                )
+                lines.append(f"  {t1} vs {t2}: {val:.3f} ({label})")
+    return "\n".join(lines)
+
+
+def rank_tickers(tickers: list[str], metric: str) -> str:
+    scores: list[tuple[str, float]] = []
+    for ticker in tickers:
+        rows = fuzzy_query(ticker, metric)
+        if rows:
+            by_year = {}
+            for r in rows:
+                fy = r["fiscal_year"]
+                if fy not in by_year:
+                    by_year[fy] = r["value"]
+            latest_fy = max(by_year.keys(), key=_parse_fiscal_year)
+            scores.append((ticker, by_year[latest_fy]))
+        else:
+            info = load_ticker_info(ticker)
+            if info:
+                val = info.get(metric)
+                if val and isinstance(val, (int, float)):
+                    scores.append((ticker, val))
+
+    if not scores:
+        return f"ERROR: No data for metric '{metric}' for any of {tickers}."
+
+    scores.sort(key=lambda x: x[1], reverse=True)
+    lines = [f"Ticker Ranking by {metric} (highest first):"]
+    for rank, (ticker, val) in enumerate(scores, 1):
+        lines.append(f"  {rank}. {ticker}: ${val:,.0f}M")
+    return "\n".join(lines)
