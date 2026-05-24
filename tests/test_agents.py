@@ -39,3 +39,16 @@ def test_financials_agent_calls_tool_when_requested():
         result = run_financials("What is AAPL revenue?")
 
     assert "AAPL" in result or "400" in result
+
+
+def test_news_agent_returns_string():
+    from agents.news import run as run_news
+    with patch("agents.news.ollama.chat", return_value=_make_ollama_response("Apple released iPhone 17.")):
+        result = run_news("What is the latest news on AAPL?")
+    assert isinstance(result, str)
+    assert len(result) > 0
+
+
+def test_news_agent_only_has_news_tools():
+    from agents.news import TOOL_FUNCTIONS
+    assert set(TOOL_FUNCTIONS.keys()) == {"get_stock_news", "search_news"}
