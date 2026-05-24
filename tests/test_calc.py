@@ -103,3 +103,55 @@ def test_calculate_yoy_missing_data():
     from tools.calc import calculate_yoy
     result = calculate_yoy("ZZZNO", "revenue")
     assert "ERROR" in result or "No data" in result
+
+
+from tools.db import save_ticker_info
+
+
+def test_calculate_peg_returns_ratio():
+    from tools.calc import calculate_peg
+    _seed_income("PEGCO", [
+        ("Sep 28, 2024", "Net income", "Net income", 100_000.0),
+        ("Sep 30, 2023", "Net income", "Net income", 80_000.0),
+        ("Sep 24, 2022", "Net income", "Net income", 64_000.0),
+    ])
+    save_ticker_info("PEGCO", {
+        "trailingPE": 25.0,
+        "sector": "Technology",
+        "longBusinessSummary": "A fake company.",
+    })
+    result = calculate_peg("PEGCO")
+    assert "PEGCO" in result
+    assert "PEG" in result
+
+
+def test_calculate_peg_missing_pe():
+    from tools.calc import calculate_peg
+    save_ticker_info("NOPECO", {
+        "sector": "Technology",
+        "longBusinessSummary": "No PE company.",
+    })
+    result = calculate_peg("NOPECO")
+    assert "ERROR" in result or "N/A" in result or "unavailable" in result.lower()
+
+
+def test_calculate_dcf_returns_intrinsic_value():
+    from tools.calc import calculate_dcf
+    _seed_income("DCFCO", [
+        ("Sep 28, 2024", "Operating income", "Operating income", 50_000.0),
+    ])
+    save_ticker_info("DCFCO", {
+        "currentPrice": 150.0,
+        "sharesOutstanding": 1_000_000_000,
+        "sector": "Technology",
+        "longBusinessSummary": "A DCF test company.",
+    })
+    result = calculate_dcf("DCFCO", growth_rate=0.10, discount_rate=0.10)
+    assert "DCFCO" in result
+    assert "Intrinsic value" in result or "intrinsic" in result.lower()
+
+
+def test_calculate_dcf_missing_operating_income():
+    from tools.calc import calculate_dcf
+    result = calculate_dcf("ZZZNO_OP_INC")
+    assert "ERROR" in result

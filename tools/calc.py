@@ -94,3 +94,85 @@ def calculate_yoy(ticker: str, metric: str) -> str:
         else:
             lines.append(f"  {prev_fy} → {curr_fy}: ${curr_val:,.0f}M (prev was 0)")
     return "\n".join(lines)
+
+
+def calculate_peg(ticker: str) -> str:
+    info = load_ticker_info(ticker)
+    if not info:
+        return f"ERROR: No company info for {ticker} — call get_company_info first."
+    pe = info.get("trailingPE")
+    if not pe or not isinstance(pe, (int, float)):
+        return f"ERROR: P/E ratio unavailable for {ticker}."
+
+    net_rows = fuzzy_query(ticker, "net income")
+    if len(net_rows) < 2:
+        return f"ERROR: Need at least 2 years of net income for {ticker} EPS growth."
+    by_year = {}
+    for r in net_rows:
+        fy = r["fiscal_year"]
+        if fy not in by_year:
+            by_year[fy] = r["value"]
+    years = sorted(by_year.keys(), key=_parse_fiscal_year)
+    start_val, end_val = by_year[years[0]], by_year[years[-1]]
+    if start_val <= 0:
+        return f"ERROR: Invalid net income start value for {ticker}."
+    n_years = (
+        (_parse_fiscal_year(years[-1]) - _parse_fiscal_year(years[0])).days / 365.25
+    )
+    eps_growth_rate = ((end_val / start_val) ** (1 / n_years) - 1) * 100
+    if eps_growth_rate <= 0:
+        return f"{ticker} PEG: N/A (negative EPS growth rate: {eps_growth_rate:.1f}%)"
+    peg = pe / eps_growth_rate
+    return (
+        f"{ticker} PEG Ratio:\n"
+        f"  Trailing P/E: {pe:.1f}\n"
+        f"  EPS Growth Rate (annualised): {eps_growth_rate:.1f}%\n"
+        f"  PEG = {peg:.2f}  (< 1 suggests undervalued relative to growth)"
+    )
+
+
+def calculate_dcf(
+    ticker: str, growth_rate: float = 0.10, discount_rate: float = 0.10
+) -> str:
+    op_rows = fuzzy_query(ticker, "operating income")
+    if not op_rows:
+        return f"ERROR: No operating income data for {ticker} — call get_income_statement first."
+
+    by_year = {}
+    for r in op_rows:
+        fy = r["fiscal_year"]
+        if fy not in by_year:
+            by_year[fy] = r["value"]
+    latest_fy = max(by_year.keys(), key=_parse_fiscal_year)
+    base_fcf = by_year[latest_fy] * 1_000_000  # millions → dollars
+
+    terminal_growth = 0.03
+    pv_total = 0.0
+    for t in range(1, 6):
+        fcf_t = base_fcf * (1 + growth_rate) ** t
+        pv_total += fcf_t / (1 + discount_rate) ** t
+    fcf_5 = base_fcf * (1 + growth_rate) ** 5
+    terminal_value = fcf_5 * (1 + terminal_growth) / (discount_rate - terminal_growth)
+    pv_total += terminal_value / (1 + discount_rate) ** 5
+
+    info = load_ticker_info(ticker)
+    shares = info.get("sharesOutstanding") if info else None
+    current_price = info.get("currentPrice") if info else None
+
+    lines = [
+        f"{ticker} DCF Valuation (5-year, operating income as FCF proxy):",
+        f"  Base FCF ({latest_fy}): ${base_fcf / 1e9:.2f}B",
+        f"  Assumed growth rate: {growth_rate:.0%} | Discount rate: {discount_rate:.0%}",
+        f"  Terminal growth: 3%",
+        f"  PV of cash flows + terminal value: ${pv_total / 1e9:.2f}B",
+    ]
+    if shares and shares > 0:
+        iv_per_share = pv_total / shares
+        lines.append(f"  Intrinsic value per share: ${iv_per_share:.2f}")
+        if current_price:
+            upside = (iv_per_share - current_price) / current_price
+            lines.append(f"  Current price: ${current_price:.2f}  |  Upside/Downside: {upside:+.1%}")
+    else:
+        lines.append("  Intrinsic value per share: N/A (shares outstanding unavailable)")
+    lines.append("  Note: Uses operating income as FCF proxy. Treat as directional estimate only.")
+    return "\n".join(lines)
