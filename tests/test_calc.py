@@ -40,3 +40,66 @@ def test_get_price_history_returns_error_for_missing_ticker(monkeypatch):
     monkeypatch.setattr(yf, "Ticker", lambda t: FakeTicker())
     result = price_mod.get_price_history("ZZZFAKE999")
     assert "No price history" in result or "Failed" in result
+
+
+from tools.db import save_to_cache
+
+
+def _seed_income(ticker, rows):
+    init_db()
+    save_to_cache([
+        {"ticker": ticker, "fiscal_year": fy, "section": section,
+         "line_item": line_item, "value": value, "fetched_at": time.time()}
+        for fy, section, line_item, value in rows
+    ])
+
+
+def test_calculate_revenue_cagr_returns_percentage():
+    from tools.calc import calculate_revenue_cagr
+    _seed_income("CAGRCO", [
+        ("Sep 28, 2024", "Net sales", "Net sales", 400_000.0),
+        ("Sep 30, 2023", "Net sales", "Net sales", 370_000.0),
+        ("Sep 24, 2022", "Net sales", "Net sales", 340_000.0),
+    ])
+    result = calculate_revenue_cagr("CAGRCO", years=2)
+    assert isinstance(result, str)
+    assert "CAGRCO" in result
+    assert "%" in result
+
+
+def test_calculate_revenue_cagr_missing_data():
+    from tools.calc import calculate_revenue_cagr
+    result = calculate_revenue_cagr("ZZZNOCAGR")
+    assert "ERROR" in result or "No revenue data" in result
+
+
+def test_calculate_margin_trend_returns_table():
+    from tools.calc import calculate_margin_trend
+    _seed_income("MARGCO", [
+        ("Sep 28, 2024", "Net sales", "Net sales", 400_000.0),
+        ("Sep 28, 2024", "Gross margin", "Gross margin", 160_000.0),
+        ("Sep 28, 2024", "Net income", "Net income", 80_000.0),
+        ("Sep 30, 2023", "Net sales", "Net sales", 370_000.0),
+        ("Sep 30, 2023", "Gross margin", "Gross margin", 140_000.0),
+        ("Sep 30, 2023", "Net income", "Net income", 70_000.0),
+    ])
+    result = calculate_margin_trend("MARGCO")
+    assert "MARGCO" in result
+    assert "gross" in result.lower() or "margin" in result.lower()
+
+
+def test_calculate_yoy_returns_change():
+    from tools.calc import calculate_yoy
+    _seed_income("YOYCO", [
+        ("Sep 28, 2024", "Net sales", "Net sales", 400_000.0),
+        ("Sep 30, 2023", "Net sales", "Net sales", 370_000.0),
+    ])
+    result = calculate_yoy("YOYCO", "revenue")
+    assert "YOYCO" in result
+    assert "%" in result
+
+
+def test_calculate_yoy_missing_data():
+    from tools.calc import calculate_yoy
+    result = calculate_yoy("ZZZNO", "revenue")
+    assert "ERROR" in result or "No data" in result
