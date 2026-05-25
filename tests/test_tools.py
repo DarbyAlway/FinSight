@@ -181,3 +181,38 @@ def test_upsert_and_search_company_profile():
     results = search_company_profiles(client, "company that makes smartphones and wearables", top_k=3)
     assert len(results) > 0
     assert any(r["symbol"] == "AAPL" for r in results)
+
+
+# ---------------------------------------------------------------------------
+# Balance sheet DB tests
+# ---------------------------------------------------------------------------
+
+def test_init_db_creates_balance_sheet_table():
+    from main import init_db, DB_PATH
+    init_db()
+    import duckdb
+    with duckdb.connect(DB_PATH) as con:
+        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+    assert "balance_sheets" in tables
+
+
+def test_save_and_load_balance_sheet_roundtrip():
+    import time
+    from tools.db import init_db, save_balance_sheet, load_balance_sheet
+    init_db()
+    rows = [
+        {"ticker": "BSTEST", "fiscal_year": "Dec 31, 2025", "section": "Assets",
+         "line_item": "Total assets", "value": 2324.0, "fetched_at": time.time()},
+        {"ticker": "BSTEST", "fiscal_year": "Dec 31, 2025", "section": "Equity",
+         "line_item": "Total stockholders equity", "value": 1721.0, "fetched_at": time.time()},
+    ]
+    save_balance_sheet(rows)
+    result = load_balance_sheet("BSTEST")
+    assert "Total assets" in result
+    assert "2,324" in result
+
+
+def test_is_balance_sheet_fresh_returns_false_when_empty():
+    from tools.db import init_db, is_balance_sheet_fresh
+    init_db()
+    assert is_balance_sheet_fresh("ZZZNOTREAL_BS") is False

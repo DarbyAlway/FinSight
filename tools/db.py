@@ -53,6 +53,17 @@ def init_db():
                 PRIMARY KEY (ticker, date)
             )
         """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS balance_sheets (
+                ticker      VARCHAR,
+                fiscal_year VARCHAR,
+                section     VARCHAR,
+                line_item   VARCHAR,
+                value       DOUBLE,
+                fetched_at  DOUBLE,
+                PRIMARY KEY (ticker, fiscal_year, section, line_item)
+            )
+        """)
 
 
 def is_cache_fresh(ticker: str) -> bool:
@@ -211,4 +222,52 @@ def load_quarterly_cache(ticker: str) -> str:
             lines.append(f"    {section}")
             current_section = section
         lines.append(f"      {line_item}: ${value:,.1f}M")
+    return "\n".join(lines)
+
+
+def is_balance_sheet_fresh(ticker: str) -> bool:
+    with duckdb.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT fetched_at FROM balance_sheets WHERE ticker = ? LIMIT 1",
+            (ticker,)
+        ).fetchone()
+    if row is None:
+        return False
+    return (time.time() - row[0]) / 86400 < CACHE_TTL_DAYS
+
+
+def save_balance_sheet(rows: list[dict]):
+    if not rows:
+        return
+    with duckdb.connect(DB_PATH) as con:
+        con.executemany(
+            """INSERT OR REPLACE INTO balance_sheets
+               (ticker, fiscal_year, section, line_item, value, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            [(r["ticker"], r["fiscal_year"], r["section"],
+              r["line_item"], r["value"], r["fetched_at"]) for r in rows],
+        )
+
+
+def load_balance_sheet(ticker: str) -> str:
+    with duckdb.connect(DB_PATH) as con:
+        rows = con.execute(
+            "SELECT fiscal_year, section, line_item, value FROM balance_sheets "
+            "WHERE ticker = ? ORDER BY fiscal_year DESC, section, line_item",
+            (ticker,)
+        ).fetchall()
+    if not rows:
+        return ""
+    lines = [f"{ticker} Balance Sheet (SEC 10-K, cached)"]
+    current_fy = None
+    current_section = None
+    for fiscal_year, section, line_item, value in rows:
+        if fiscal_year != current_fy:
+            lines.append(f"\n  {fiscal_year}")
+            current_fy = fiscal_year
+            current_section = None
+        if section != current_section:
+            lines.append(f"    {section}")
+            current_section = section
+        lines.append(f"      {line_item}: ${value:,.0f}M")
     return "\n".join(lines)
