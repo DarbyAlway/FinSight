@@ -89,7 +89,7 @@ def process_turn(
     t0 = time.time()
     if _is_conversational(user_input):
         agents_to_run = []
-        logging.info("[timing] plan call: skipped (conversational)")
+        logging.info("[Orchestrator] conversational — no agents called")
     else:
         plan_response = ollama.chat(model=MODEL, messages=planning_messages, options=OPT_PLAN)
         plan_content = plan_response.message.content or ""
@@ -97,9 +97,13 @@ def process_turn(
         try:
             plan = _parse_plan(plan_content)
             agents_to_run: list[str] = plan.get("agents", [])
+            tickers = plan.get("tickers", [])
+            reason = plan.get("reason", "")
+            logging.info("[Orchestrator] plan → agents=%s  tickers=%s  reason=%s", agents_to_run, tickers, reason)
         except (json.JSONDecodeError, ValueError):
-            logging.warning("Orchestrator plan JSON malformed — using keyword fallback")
+            logging.warning("[Orchestrator] plan JSON malformed — using keyword fallback")
             agents_to_run = _keyword_fallback(user_input)
+            logging.info("[Orchestrator] keyword fallback → agents=%s", agents_to_run)
 
     accumulated_context = ""
     agent_map = {
@@ -112,14 +116,16 @@ def process_turn(
     for agent_name in agents_to_run:
         fn = agent_map.get(agent_name)
         if fn is None:
+            logging.warning("[Orchestrator] unknown agent '%s' — skipping", agent_name)
             continue
         try:
+            logging.info("[Orchestrator] → calling agent: %s", agent_name)
             t1 = time.time()
             result = fn(user_input, accumulated_context, history=messages)
             accumulated_context += f"\n\n[{agent_name.upper()} AGENT]\n{result}"
-            logging.info("[timing] %s agent: %.2fs", agent_name, time.time() - t1)
+            logging.info("[Orchestrator] ✓ agent %s done (%.2fs)", agent_name, time.time() - t1)
         except Exception as e:
-            logging.warning("Orchestrator: %s agent failed — %s", agent_name, e)
+            logging.warning("[Orchestrator] %s agent failed — %s", agent_name, e)
             _log_agent_error(agent_name, e)
 
     synthesis_system = persona_system or SYNTHESIS_SYSTEM
