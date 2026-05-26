@@ -11,7 +11,7 @@ from tools.vector import upsert_company_profile, _get_qdrant
 def fetch_and_cache_company(symbol: str) -> dict | None:
     try:
         import time
-        info = yf.Ticker(symbol).info
+        info = yf.Ticker(symbol).info # get info from "yahoo finance" we need to change to "edgar" instead
         info["_cached_at"] = time.time()
         new_summary = info.get("longBusinessSummary", "") # store the summarize business in here
         new_hash = hashlib.md5(new_summary.encode()).hexdigest()
@@ -36,17 +36,15 @@ def get_company_info(symbol: str) -> str:
         return f"No company info found for {symbol}."
     cached_at = info.get("_cached_at")
     as_of = datetime.fromtimestamp(cached_at).strftime("%Y-%m-%d %H:%M") if cached_at else "unknown"
-    fiscal_year_end = info.get("mostRecentQuarter")
-    fy_label = f"FY ending {datetime.fromtimestamp(fiscal_year_end).strftime('%b %Y')}" if fiscal_year_end else "TTM"
     lines = [
         f"{info.get('longName', symbol)} ({symbol})",
         f"Data as of: {as_of} (cached)",
         f"Sector: {info.get('sector','')} | Industry: {info.get('industry','')}",
         f"Market Cap: ${info.get('marketCap',0):,.0f}  [point-in-time as of {as_of}]",
         f"P/E trailing: {info.get('trailingPE','N/A')} | Forward P/E: {info.get('forwardPE','N/A')}  [TTM / next-12m estimates]",
-        f"Profit Margin: {info.get('profitMargins',0):.1%} | Gross Margin: {info.get('grossMargins',0):.1%}  [{fy_label}]",
-        f"Debt/Equity: {info.get('debtToEquity','N/A')} | Beta: {info.get('beta','N/A')}",
+        f"Beta: {info.get('beta','N/A')} | Current Price: ${info.get('currentPrice','N/A')}",
         f"Recommendation: {info.get('recommendationKey','N/A')} ({info.get('numberOfAnalystOpinions',0)} analysts)",
+        f"Note: For margins and D/E, use the ratios agent tools (SEC-sourced, more accurate than yfinance).",
         f"\n{info.get('longBusinessSummary','')}",
     ]
     return "\n".join(lines)

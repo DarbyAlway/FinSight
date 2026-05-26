@@ -25,6 +25,7 @@ from tools.config import MODEL
 from agents.financials import run as run_financials
 from agents.news import run as run_news
 from agents.calc import run as run_calc
+from agents.ratios import run as run_ratios
 from prompts import PLAN_SYSTEM, SYNTHESIS_SYSTEM
 
 OPT_PLAN = {"temperature": 0.0}
@@ -46,6 +47,7 @@ _FINANCIAL_KEYWORDS = {
     "news", "headline", "article", "filing", "10-k", "10-q",
     "stock", "share", "price", "dividend", "sector", "analyst",
     "correlation", "rank", "compare", "quarterly", "annual",
+    "debt", "equity", "roa", "roe", "balance sheet",
 }
 
 import re as _re
@@ -65,7 +67,11 @@ def _keyword_fallback(question: str) -> list[str]:
     q = question.lower()
     if any(w in q for w in ["news", "headline", "article", "latest"]):
         return ["news"]
-    if any(w in q for w in ["dcf", "cagr", "correlation", "peg", "margin", "rank", "valuation", "calculate"]):
+    if any(w in q for w in ["debt", "equity ratio", "d/e", "roa", "roe", "return on"]):
+        return ["ratios"]
+    if any(w in q for w in ["margin", "profit margin", "gross margin"]):
+        return ["ratios"]
+    if any(w in q for w in ["dcf", "cagr", "correlation", "peg", "rank", "valuation", "calculate"]):
         return ["calc"]
     return ["financials"]
 
@@ -100,6 +106,7 @@ def process_turn(
         "financials": run_financials,
         "news": run_news,
         "calc": run_calc,
+        "ratios": run_ratios,
     }
 
     for agent_name in agents_to_run:
