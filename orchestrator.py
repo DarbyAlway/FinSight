@@ -67,6 +67,8 @@ def _keyword_fallback(question: str) -> list[str]:
     q = question.lower()
     if any(w in q for w in ["news", "headline", "article", "latest"]):
         return ["news"]
+    if any(w in q for w in ["p/e", "pe ratio", "price to earnings", "price-to-earnings", "trailing pe", "forward pe"]):
+        return ["financials"]
     if any(w in q for w in ["debt", "equity ratio", "d/e", "roa", "roe", "return on"]):
         return ["ratios"]
     if any(w in q for w in ["margin", "profit margin", "gross margin"]):
