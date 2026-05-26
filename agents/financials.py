@@ -37,7 +37,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_company_info",
-            "description": "Get company profile, sector, and key financial ratios for a ticker.",
+            "description": "Get company profile and market metrics: P/E ratio, current price, market cap, beta, dividend yield, sector, industry, and analyst recommendation. Use for any market-price-based metrics — NOT for margins, D/E, ROA, or ROE (those are in the ratios agent).",
             "parameters": {
                 "type": "object",
                 "properties": {"symbol": {"type": "string"}},

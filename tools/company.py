@@ -43,6 +43,7 @@ def get_company_info(symbol: str) -> str:
         f"Market Cap: ${info.get('marketCap',0):,.0f}  [point-in-time as of {as_of}]",
         f"P/E trailing: {info.get('trailingPE','N/A')} | Forward P/E: {info.get('forwardPE','N/A')}  [TTM / next-12m estimates]",
         f"Beta: {info.get('beta','N/A')} | Current Price: ${info.get('currentPrice','N/A')}",
+        f"Dividend Yield: {info.get('dividendYield', 0) * 100:.2f}%" if info.get('dividendYield') else "Dividend Yield: N/A",
         f"Recommendation: {info.get('recommendationKey','N/A')} ({info.get('numberOfAnalystOpinions',0)} analysts)",
         f"Note: For margins and D/E, use the ratios agent tools (SEC-sourced, more accurate than yfinance).",
         f"\n{info.get('longBusinessSummary','')}",

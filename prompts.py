@@ -60,7 +60,9 @@ CALC_SYSTEM = (
     "If data is missing, return the error string from the tool — do not guess. "
     "Do not re-fetch data that is already present in the context you received. "
     "NOTE: For profit margin, gross margin, debt-to-equity, ROA, ROE — "
-    "these are handled by the ratios agent, not this agent. Do not attempt to compute them here."
+    "these are handled by the ratios agent, not this agent. Do not attempt to compute them here. "
+    "Use calculate_margin_trend when the user wants to see how margins have changed over multiple years (trend view). "
+    "For a single-point margin value, defer to the ratios agent."
 )
 
 RATIOS_SYSTEM = (
