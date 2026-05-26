@@ -373,3 +373,56 @@ def test_is_cash_flow_fresh_returns_false_when_empty():
     from tools.db import init_db, is_cash_flow_fresh
     init_db()
     assert is_cash_flow_fresh("ZZZNOTREAL_CF") is False
+
+
+# ---------------------------------------------------------------------------
+# Cash flow parser tests
+# ---------------------------------------------------------------------------
+
+_SAMPLE_CF = (
+    "                                               Sep 27, 2025  Sep 28, 2024\n"
+    "   ────────────────────────────────────────────────────────\n"
+    "    Cash flows from operating activities:\n"
+    "          Net income                                 $100,000       $80,000\n"
+    "          Depreciation and amortization               $20,000       $18,000\n"
+    "          Net cash provided by operating activities  $120,000       $98,000\n"
+    "    Cash flows from investing activities:\n"
+    "          Purchases of property, plant and equipment  $(30,000)     $(25,000)\n"
+    "          Net cash used in investing activities        $(30,000)     $(25,000)\n"
+    "    Cash flows from financing activities:\n"
+    "          Proceeds from long-term debt issuance        $50,000       $10,000\n"
+    "          Net cash from financing activities           $50,000       $10,000\n"
+    "   Source: SEC XBRL  •  (In thousands)\n"
+)
+
+
+def test_parse_cash_flow_extracts_rows():
+    from tools.cash_flow import parse_cash_flow
+    rows = parse_cash_flow("RKLB", _SAMPLE_CF)
+    assert len(rows) > 0
+    items = [r["line_item"] for r in rows]
+    assert "Net income" in items
+    assert any("operating activities" in i.lower() for i in items)
+
+
+def test_parse_cash_flow_three_sections():
+    from tools.cash_flow import parse_cash_flow
+    rows = parse_cash_flow("RKLB", _SAMPLE_CF)
+    sections = {r["section"] for r in rows}
+    assert "Operating Activities" in sections
+    assert "Investing Activities" in sections
+    assert "Financing Activities" in sections
+
+
+def test_parse_cash_flow_applies_thousands_multiplier():
+    from tools.cash_flow import parse_cash_flow
+    sample = (
+        "                                   Sep 27, 2025\n"
+        "    Cash flows from operating activities:\n"
+        "          Net cash from operations  $120,000\n"
+        "   Source: SEC XBRL  •  (In thousands)\n"
+    )
+    rows = parse_cash_flow("TEST", sample)
+    assert len(rows) > 0
+    # $120,000 thousands = $120M stored
+    assert rows[0]["value"] == 120.0
