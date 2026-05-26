@@ -426,3 +426,64 @@ def test_parse_cash_flow_applies_thousands_multiplier():
     assert len(rows) > 0
     # $120,000 thousands = $120M stored
     assert rows[0]["value"] == 120.0
+
+
+# ---------------------------------------------------------------------------
+# FCF and cash runway tests
+# ---------------------------------------------------------------------------
+
+def test_calculate_free_cash_flow_from_cache():
+    import time
+    from tools.db import init_db, save_cash_flow
+    from tools.calc import calculate_free_cash_flow
+    init_db()
+    save_cash_flow([
+        {"ticker": "FCFTEST", "fiscal_year": "Dec 31, 2025",
+         "section": "Operating Activities",
+         "line_item": "Net cash provided by operating activities",
+         "value": 200.0, "fetched_at": time.time()},
+        {"ticker": "FCFTEST", "fiscal_year": "Dec 31, 2025",
+         "section": "Investing Activities",
+         "line_item": "Purchases of property, plant and equipment",
+         "value": -50.0, "fetched_at": time.time()},
+        {"ticker": "FCFTEST", "fiscal_year": "Dec 31, 2024",
+         "section": "Operating Activities",
+         "line_item": "Net cash provided by operating activities",
+         "value": 150.0, "fetched_at": time.time()},
+        {"ticker": "FCFTEST", "fiscal_year": "Dec 31, 2024",
+         "section": "Investing Activities",
+         "line_item": "Purchases of property, plant and equipment",
+         "value": -40.0, "fetched_at": time.time()},
+    ])
+    result = calculate_free_cash_flow("FCFTEST")
+    # 2025 FCF = 200 + (-50) = 150, 2024 FCF = 150 + (-40) = 110
+    assert "150" in result
+    assert "Dec 31, 2025" in result
+
+
+def test_calculate_cash_runway_from_cache():
+    import time
+    from tools.db import init_db, save_cash_flow, save_balance_sheet
+    from tools.calc import calculate_cash_runway
+    init_db()
+    save_balance_sheet([
+        {"ticker": "RUNWAY", "fiscal_year": "Dec 31, 2025",
+         "section": "Assets",
+         "line_item": "Cash and cash equivalents",
+         "value": 600.0, "fetched_at": time.time()},
+    ])
+    save_cash_flow([
+        {"ticker": "RUNWAY", "fiscal_year": "Dec 31, 2025",
+         "section": "Operating Activities",
+         "line_item": "Net cash used in operating activities",
+         "value": -120.0, "fetched_at": time.time()},
+        {"ticker": "RUNWAY", "fiscal_year": "Dec 31, 2025",
+         "section": "Investing Activities",
+         "line_item": "Purchases of property, plant and equipment",
+         "value": -80.0, "fetched_at": time.time()},
+    ])
+    result = calculate_cash_runway("RUNWAY")
+    # FCF = -120 + (-80) = -200 annual burn
+    # Runway = 600 / 200 * 12 = 36 months
+    assert "36" in result
+    assert "600" in result

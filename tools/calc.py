@@ -178,6 +178,117 @@ def calculate_dcf(
     return "\n".join(lines)
 
 
+def calculate_free_cash_flow(ticker: str) -> str:
+    with duckdb.connect(DB_PATH) as con:
+        op_rows = con.execute(
+            """SELECT fiscal_year, value FROM cash_flows
+               WHERE ticker = ?
+               AND (lower(line_item) LIKE '%operating activities%'
+                    OR lower(line_item) LIKE '%cash from operations%')
+               ORDER BY fiscal_year DESC LIMIT 2""",
+            (ticker,)
+        ).fetchall()
+        if not op_rows:
+            return (
+                f"ERROR: No operating cash flow data for {ticker} "
+                "— call get_cash_flow_statement first."
+            )
+        capex_rows = con.execute(
+            """SELECT fiscal_year, value FROM cash_flows
+               WHERE ticker = ?
+               AND section = 'Investing Activities'
+               AND (lower(line_item) LIKE '%capital expenditure%'
+                    OR lower(line_item) LIKE '%purchases of property%')
+               ORDER BY fiscal_year DESC LIMIT 2""",
+            (ticker,)
+        ).fetchall()
+
+    op_by_year = {r[0]: r[1] for r in op_rows}
+    capex_by_year = {r[0]: r[1] for r in capex_rows}
+    years = sorted(op_by_year.keys(), key=_parse_fiscal_year, reverse=True)
+
+    lines = [f"{ticker} Free Cash Flow (SEC 10-K):"]
+    for fy in years:
+        op_cf = op_by_year[fy]
+        capex = capex_by_year.get(fy, 0)  # stored negative for outflows
+        fcf = op_cf + capex
+        capex_label = f"${abs(capex):,.0f}M capex" if capex != 0 else "capex not found"
+        lines.append(
+            f"  {fy}: OpCF ${op_cf:,.0f}M − {capex_label} = FCF ${fcf:,.0f}M"
+        )
+    return "\n".join(lines)
+
+
+def calculate_cash_runway(ticker: str) -> str:
+    with duckdb.connect(DB_PATH) as con:
+        cash_rows = con.execute(
+            """SELECT fiscal_year, value FROM balance_sheets
+               WHERE ticker = ?
+               AND lower(line_item) LIKE '%cash and cash equivalents%'
+               ORDER BY fiscal_year DESC LIMIT 1""",
+            (ticker,)
+        ).fetchall()
+        if not cash_rows:
+            return (
+                f"ERROR: No cash balance data for {ticker} "
+                "— call get_balance_sheet and get_cash_flow_statement first."
+            )
+        op_rows = con.execute(
+            """SELECT fiscal_year, value FROM cash_flows
+               WHERE ticker = ?
+               AND (lower(line_item) LIKE '%operating activities%'
+                    OR lower(line_item) LIKE '%cash from operations%')
+               ORDER BY fiscal_year DESC LIMIT 2""",
+            (ticker,)
+        ).fetchall()
+        if not op_rows:
+            return (
+                f"ERROR: No operating cash flow data for {ticker} "
+                "— call get_cash_flow_statement first."
+            )
+        capex_rows = con.execute(
+            """SELECT fiscal_year, value FROM cash_flows
+               WHERE ticker = ?
+               AND section = 'Investing Activities'
+               AND (lower(line_item) LIKE '%capital expenditure%'
+                    OR lower(line_item) LIKE '%purchases of property%')
+               ORDER BY fiscal_year DESC LIMIT 2""",
+            (ticker,)
+        ).fetchall()
+
+    cash_balance_fy, cash_balance = cash_rows[0]
+    op_by_year = {r[0]: r[1] for r in op_rows}
+    capex_by_year = {r[0]: r[1] for r in capex_rows}
+    years = sorted(op_by_year.keys(), key=_parse_fiscal_year, reverse=True)
+    fcf_by_year = {fy: op_by_year[fy] + capex_by_year.get(fy, 0) for fy in years}
+
+    latest_fy = years[0]
+    latest_fcf = fcf_by_year[latest_fy]
+
+    lines = [
+        f"{ticker} Cash Runway:",
+        f"  Cash & equivalents ({cash_balance_fy}): ${cash_balance:,.0f}M",
+        f"  Latest FCF ({latest_fy}): ${latest_fcf:,.0f}M",
+    ]
+
+    if latest_fcf >= 0:
+        lines.append("  Runway: N/A (FCF positive — company is cash-generative)")
+        return "\n".join(lines)
+
+    annual_burn = abs(latest_fcf)
+    runway_months = (cash_balance / annual_burn) * 12
+
+    if len(years) > 1:
+        prev_fcf = fcf_by_year[years[1]]
+        if prev_fcf != 0 and abs(latest_fcf - prev_fcf) / abs(prev_fcf) > 0.3:
+            lines.append(
+                f"  Note: Burn rate changed >30% YoY ({prev_fcf:,.0f}M → {latest_fcf:,.0f}M)"
+            )
+
+    lines.append(f"  Estimated runway: {runway_months:.1f} months")
+    return "\n".join(lines)
+
+
 SECTOR_PEERS: dict[str, list[str]] = {
     "Technology": ["AAPL", "MSFT", "GOOGL", "META", "NVDA"],
     "Consumer Cyclical": ["AMZN", "TSLA", "HD", "NKE", "MCD"],
