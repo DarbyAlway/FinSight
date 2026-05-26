@@ -530,3 +530,59 @@ def test_calculate_interest_coverage_from_cache():
     ])
     result = calculate_interest_coverage("ICTEST")
     assert "5.0x" in result  # 300 / 60 = 5.0x
+
+
+# ---------------------------------------------------------------------------
+# Date injection tests
+# ---------------------------------------------------------------------------
+
+def test_is_time_sensitive_detects_keywords():
+    from orchestrator import _is_time_sensitive
+    assert _is_time_sensitive("What is the latest news about RKLB?") is True
+    assert _is_time_sensitive("What is RKLB's current cash burn?") is True
+    assert _is_time_sensitive("What were Q3 earnings?") is True
+    assert _is_time_sensitive("How much runway does RKLB have today?") is True
+
+
+def test_is_time_sensitive_returns_false_for_neutral():
+    from orchestrator import _is_time_sensitive
+    assert _is_time_sensitive("What is the P/E ratio of AAPL?") is False
+    assert _is_time_sensitive("Compare revenue of AAPL and MSFT") is False
+    assert _is_time_sensitive("Calculate DCF for NVDA") is False
+
+
+# ---------------------------------------------------------------------------
+# get_company_info output tests
+# ---------------------------------------------------------------------------
+
+def test_get_company_info_includes_price_targets_and_multiples():
+    import time
+    from tools.db import init_db, save_ticker_info
+    from tools.company import get_company_info
+    init_db()
+    save_ticker_info("PTTEST", {
+        "longName": "Price Target Test Inc",
+        "sector": "Technology",
+        "industry": "Software",
+        "longBusinessSummary": "A test company.",
+        "marketCap": 1_000_000_000,
+        "trailingPE": 25.0,
+        "forwardPE": 20.0,
+        "beta": 1.2,
+        "currentPrice": 50.0,
+        "recommendationKey": "buy",
+        "numberOfAnalystOpinions": 10,
+        "targetMeanPrice": 65.0,
+        "targetHighPrice": 80.0,
+        "targetLowPrice": 50.0,
+        "priceToSalesTrailing12Months": 8.5,
+        "priceToBook": 3.2,
+        "_cached_at": time.time(),
+    })
+    result = get_company_info("PTTEST")
+    assert "65.0" in result      # targetMeanPrice
+    assert "80.0" in result      # targetHighPrice
+    assert "8.5" in result       # P/S
+    assert "3.2" in result       # P/B
+    assert "Price Targets" in result
+    assert "P/S" in result
