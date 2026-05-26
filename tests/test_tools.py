@@ -336,7 +336,8 @@ def test_calculate_debt_to_equity_missing_data():
 # ---------------------------------------------------------------------------
 
 def test_init_db_creates_cash_flows_table():
-    from main import init_db, DB_PATH
+    from tools.db import init_db
+    from tools.config import DB_PATH
     init_db()
     import duckdb
     with duckdb.connect(DB_PATH) as con:
@@ -364,6 +365,8 @@ def test_save_and_load_cash_flow_roundtrip():
     assert "200" in result
     assert "Operating Activities" in result
     assert "Investing Activities" in result
+    assert "Purchases of property, plant and equipment" in result
+    assert "-50" in result
 
 
 def test_is_cash_flow_fresh_returns_false_when_empty():
