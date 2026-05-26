@@ -5,6 +5,6 @@ __pycache__/
 .env
 eval_results.json
 logs/
-claude/
+claude/memory/
 debug_10q.py
 test/
