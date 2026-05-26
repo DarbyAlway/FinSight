@@ -5,7 +5,10 @@ import ollama
 
 from tools.config import MODEL
 from tools.balance_sheet import get_balance_sheet
-from tools.ratios import calculate_all_margins, calculate_debt_to_equity, calculate_roa_roe
+from tools.ratios import (
+    calculate_all_margins, calculate_debt_to_equity, calculate_roa_roe,
+    calculate_current_ratio, calculate_interest_coverage,
+)
 from prompts import RATIOS_SYSTEM 
 
 TOOLS = [
@@ -70,6 +73,36 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_current_ratio",
+            "description": (
+                "Compute current ratio (current assets / current liabilities) from SEC balance sheet. "
+                "Call get_balance_sheet first. > 1.5 = healthy, < 1.0 = liquidity risk."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"ticker": {"type": "string"}},
+                "required": ["ticker"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_interest_coverage",
+            "description": (
+                "Compute interest coverage ratio (EBIT / interest expense) from SEC income statement. "
+                "Call get_income_statement first. > 3x = comfortable, < 1.5x = solvency risk."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"ticker": {"type": "string"}},
+                "required": ["ticker"],
+            },
+        },
+    },
 ]
 
 TOOL_FUNCTIONS = {
@@ -77,6 +110,8 @@ TOOL_FUNCTIONS = {
     "calculate_all_margins": calculate_all_margins,
     "calculate_debt_to_equity": calculate_debt_to_equity,
     "calculate_roa_roe": calculate_roa_roe,
+    "calculate_current_ratio": calculate_current_ratio,
+    "calculate_interest_coverage": calculate_interest_coverage,
 }
 
 OPT = {"temperature": 0.1}

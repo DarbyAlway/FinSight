@@ -6,6 +6,7 @@ import ollama
 from tools.config import MODEL
 from tools.income import get_income_statement, get_quarterly_statement
 from tools.company import get_company_info
+from tools.cash_flow import get_cash_flow_statement
 from prompts import FINANCIALS_SYSTEM as SYSTEM_PROMPT
 
 TOOLS = [
@@ -45,12 +46,29 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_cash_flow_statement",
+            "description": (
+                "Fetch the latest 2-year cash flow statement for a ticker from SEC 10-K filings. "
+                "Use for: operating cash flow, capex, investing activities, financing activities, "
+                "cash burn, free cash flow inputs."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"ticker": {"type": "string"}},
+                "required": ["ticker"],
+            },
+        },
+    },
 ]
 
 TOOL_FUNCTIONS = {
     "get_income_statement": get_income_statement,
     "get_quarterly_statement": get_quarterly_statement,
     "get_company_info": get_company_info,
+    "get_cash_flow_statement": get_cash_flow_statement,
 }
 
 OPT = {"temperature": 0.1}
