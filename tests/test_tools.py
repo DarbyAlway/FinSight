@@ -216,3 +216,52 @@ def test_is_balance_sheet_fresh_returns_false_when_empty():
     from tools.db import init_db, is_balance_sheet_fresh
     init_db()
     assert is_balance_sheet_fresh("ZZZNOTREAL_BS") is False
+
+
+# ---------------------------------------------------------------------------
+# Balance sheet parser tests
+# ---------------------------------------------------------------------------
+
+_SAMPLE_BS = (
+    "                                               Dec 31, 2025   Dec 31, 2024\n"
+    "   ────────────────────────────────────────────────────────\n"
+    "    Assets\n"
+    "      Current assets:\n"
+    "            Cash and cash equivalents              $828,660       $271,042\n"
+    "          Total current assets                   $1,365,544       $692,621\n"
+    "        Total assets                             $2,324,478     $1,184,342\n"
+    "          Total liabilities                        $602,624       $801,889\n"
+    "      Stockholders' equity:\n"
+    "          Total stockholders' equity:           $1,721,854       $382,453\n"
+    "   Source: SEC XBRL  •  (In thousands, except shares and per share data)\n"
+)
+
+
+def test_parse_balance_sheet_extracts_rows():
+    from tools.balance_sheet import parse_balance_sheet
+    rows = parse_balance_sheet("RKLB", _SAMPLE_BS)
+    assert len(rows) > 0
+    items = [r["line_item"] for r in rows]
+    assert "Total assets" in items
+    assert any("equity" in i.lower() for i in items)
+
+
+def test_parse_balance_sheet_two_fiscal_years():
+    from tools.balance_sheet import parse_balance_sheet
+    rows = parse_balance_sheet("RKLB", _SAMPLE_BS)
+    fiscal_years = {r["fiscal_year"] for r in rows}
+    assert "Dec 31, 2025" in fiscal_years
+    assert "Dec 31, 2024" in fiscal_years
+
+
+def test_parse_balance_sheet_applies_thousands_multiplier():
+    from tools.balance_sheet import parse_balance_sheet
+    sample = (
+        "                         Dec 31, 2025\n"
+        "   ───────────────────────────────\n"
+        "        Total assets       $2,000,000\n"
+        "   Source: SEC XBRL  •  (In thousands)\n"
+    )
+    rows = parse_balance_sheet("TEST", sample)
+    asset_row = next(r for r in rows if r["line_item"] == "Total assets")
+    assert asset_row["value"] == 2000.0
