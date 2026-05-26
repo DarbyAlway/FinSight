@@ -64,6 +64,17 @@ def init_db():
                 PRIMARY KEY (ticker, fiscal_year, section, line_item)
             )
         """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS cash_flows (
+                ticker      VARCHAR,
+                fiscal_year VARCHAR,
+                section     VARCHAR,
+                line_item   VARCHAR,
+                value       DOUBLE,
+                fetched_at  DOUBLE,
+                PRIMARY KEY (ticker, fiscal_year, section, line_item)
+            )
+        """)
 
 
 def is_cache_fresh(ticker: str) -> bool:
@@ -259,6 +270,62 @@ def load_balance_sheet(ticker: str) -> str:
     if not rows:
         return ""
     lines = [f"{ticker} Balance Sheet (SEC 10-K, cached)"]
+    current_fy = None
+    current_section = None
+    for fiscal_year, section, line_item, value in rows:
+        if fiscal_year != current_fy:
+            lines.append(f"\n  {fiscal_year}")
+            current_fy = fiscal_year
+            current_section = None
+        if section != current_section:
+            lines.append(f"    {section}")
+            current_section = section
+        lines.append(f"      {line_item}: ${value:,.0f}M")
+    return "\n".join(lines)
+
+
+def is_cash_flow_fresh(ticker: str) -> bool:
+    with duckdb.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT fetched_at FROM cash_flows WHERE ticker = ? LIMIT 1",
+            (ticker,)
+        ).fetchone()
+    if row is None:
+        return False
+    return (time.time() - row[0]) / 86400 < CACHE_TTL_DAYS
+
+
+def save_cash_flow(rows: list[dict]):
+    if not rows:
+        return
+    with duckdb.connect(DB_PATH) as con:
+        con.executemany(
+            """INSERT OR REPLACE INTO cash_flows
+               (ticker, fiscal_year, section, line_item, value, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            [(r["ticker"], r["fiscal_year"], r["section"],
+              r["line_item"], r["value"], r["fetched_at"]) for r in rows],
+        )
+
+
+def load_cash_flow(ticker: str) -> str:
+    with duckdb.connect(DB_PATH) as con:
+        rows = con.execute(
+            """SELECT fiscal_year, section, line_item, value FROM cash_flows
+               WHERE ticker = ?
+               ORDER BY fiscal_year DESC,
+                        CASE section
+                            WHEN 'Operating Activities' THEN 1
+                            WHEN 'Investing Activities' THEN 2
+                            WHEN 'Financing Activities' THEN 3
+                            ELSE 4
+                        END,
+                        line_item""",
+            (ticker,)
+        ).fetchall()
+    if not rows:
+        return ""
+    lines = [f"{ticker} Cash Flow Statement (SEC 10-K, cached)"]
     current_fy = None
     current_section = None
     for fiscal_year, section, line_item, value in rows:

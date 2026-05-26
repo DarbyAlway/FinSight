@@ -329,3 +329,44 @@ def test_calculate_debt_to_equity_missing_data():
     from tools.ratios import calculate_debt_to_equity
     result = calculate_debt_to_equity("ZZZNOTREAL_DTE")
     assert result.startswith("ERROR:")
+
+
+# ---------------------------------------------------------------------------
+# Cash flow DB tests
+# ---------------------------------------------------------------------------
+
+def test_init_db_creates_cash_flows_table():
+    from main import init_db, DB_PATH
+    init_db()
+    import duckdb
+    with duckdb.connect(DB_PATH) as con:
+        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+    assert "cash_flows" in tables
+
+
+def test_save_and_load_cash_flow_roundtrip():
+    import time
+    from tools.db import init_db, save_cash_flow, load_cash_flow
+    init_db()
+    rows = [
+        {"ticker": "CFTEST", "fiscal_year": "Dec 31, 2025",
+         "section": "Operating Activities",
+         "line_item": "Net cash provided by operating activities",
+         "value": 200.0, "fetched_at": time.time()},
+        {"ticker": "CFTEST", "fiscal_year": "Dec 31, 2025",
+         "section": "Investing Activities",
+         "line_item": "Purchases of property, plant and equipment",
+         "value": -50.0, "fetched_at": time.time()},
+    ]
+    save_cash_flow(rows)
+    result = load_cash_flow("CFTEST")
+    assert "Net cash provided by operating activities" in result
+    assert "200" in result
+    assert "Operating Activities" in result
+    assert "Investing Activities" in result
+
+
+def test_is_cash_flow_fresh_returns_false_when_empty():
+    from tools.db import init_db, is_cash_flow_fresh
+    init_db()
+    assert is_cash_flow_fresh("ZZZNOTREAL_CF") is False
