@@ -1,5 +1,5 @@
 # Central prompt registry.
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 # ---------------------------------------------------------------------------
 # Time-sensitivity detection
@@ -40,11 +40,14 @@ PLAN_SYSTEM = (
     "{today}You are a stock analysis orchestrator. Given the user's question, output a JSON plan "
     "with the agents to call and the tickers involved. "
     "Available agents: "
-    "'financials' (income statements, quarterly results, company market info, P/E ratio, EPS, market cap, beta — "
+    "'financials' (income statements, quarterly results, company market info, P/E ratio, EPS, "
+    "market cap, beta, cash flow statement, operating cash flow, capex — "
     "use for any question involving stock price or market-based metrics), "
     "'news' (headlines, news search), "
-    "'calc' (valuation: DCF, PEG, CAGR, YoY growth, price correlation, sector P/E), "
-    "'ratios' (SEC-sourced financial ratios: profit/gross/operating margins, debt-to-equity, ROA, ROE — "
+    "'calc' (valuation: DCF, PEG, CAGR, YoY growth, price correlation, sector P/E, "
+    "free cash flow (FCF), cash burn rate, cash runway — requires financials agent to run first for cash flow data), "
+    "'ratios' (SEC-sourced financial ratios: profit/gross/operating margins, debt-to-equity, ROA, ROE, "
+    "current ratio, interest coverage ratio — "
     "always prefer 'ratios' over 'financials' for these metrics; "
     "NOTE: 'ratios' does NOT handle P/E ratio — P/E requires a live stock price, use 'financials' instead). "
     "TICKER RESOLUTION: When the user mentions a company by name, resolve it to the correct stock ticker. "
@@ -90,9 +93,11 @@ CALC_SYSTEM = (
     "Always show the assumptions you used (e.g. discount rate, growth rate). "
     "If data is missing, return the error string from the tool — do not guess. "
     "Do not re-fetch data that is already present in the context you received. "
-    "NOTE: For profit margin, gross margin, debt-to-equity, ROA, ROE — "
+    "NOTE: For profit margin, gross margin, debt-to-equity, ROA, ROE, current ratio, interest coverage — "
     "these are handled by the ratios agent, not this agent. Do not attempt to compute them here. "
     "Use calculate_margin_trend when the user wants to see how margins have changed over multiple years (trend view). "
+    "For FCF and cash runway: call get_cash_flow_statement (via context from financials agent) first, "
+    "then calculate_free_cash_flow or calculate_cash_runway. "
     "For a single-point margin value, defer to the ratios agent."
 )
 
@@ -101,7 +106,9 @@ RATIOS_SYSTEM = (
     "directly from SEC 10-K filings — never from yfinance. "
     "When asked for debt-to-equity, ROA, or ROE: call get_balance_sheet first, then the matching calculate_ tool. "
     "When asked for profit, gross, or operating margins: call calculate_all_margins "
-    "(it reads cached SEC income data — call get_income_statement first if the cache may be empty). "
+    "(call get_income_statement first if the cache may be empty). "
+    "When asked for current ratio: call get_balance_sheet first, then calculate_current_ratio. "
+    "When asked for interest coverage: call get_income_statement first, then calculate_interest_coverage. "
     "Always cite the fiscal year and confirm the source is SEC filings."
 )
 

@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import time
+from datetime import date
 
 import ollama
 
@@ -26,7 +27,7 @@ from agents.financials import run as run_financials
 from agents.news import run as run_news
 from agents.calc import run as run_calc
 from agents.ratios import run as run_ratios
-from prompts import PLAN_SYSTEM, SYNTHESIS_SYSTEM
+from prompts import PLAN_SYSTEM, SYNTHESIS_SYSTEM, TIME_SENSITIVE_KEYWORDS
 
 OPT_PLAN = {"temperature": 0.0}
 OPT_SYNTH = {"temperature": 0.3}
@@ -48,10 +49,18 @@ _FINANCIAL_KEYWORDS = {
     "stock", "share", "price", "dividend", "sector", "analyst",
     "correlation", "rank", "compare", "quarterly", "annual",
     "debt", "equity", "roa", "roe", "balance sheet",
+    "cash", "burn", "runway", "liquidity", "free cash flow", "fcf",
+    "cash flow", "operating cash", "capex", "interest coverage",
+    "current ratio", "price target", "target price",
+    "guidance", "outlook", "forecast", "beat", "miss", "report", "trend",
 }
 
 import re as _re
 _TICKER_RE = _re.compile(r'\b[A-Z]{1,5}\b')
+
+def _is_time_sensitive(question: str) -> bool:
+    q = question.lower()
+    return any(kw in q for kw in TIME_SENSITIVE_KEYWORDS)
 
 
 def _is_conversational(question: str) -> bool: # check if it is a normal conversation or not
@@ -63,11 +72,17 @@ def _is_conversational(question: str) -> bool: # check if it is a normal convers
     return True
 
 
-def _keyword_fallback(question: str) -> list[str]: # Check for the specific keyword, so the orchestrator can called the right agents
+def _keyword_fallback(question: str) -> list[str]:
     q = question.lower()
     if any(w in q for w in ["news", "headline", "article", "latest"]):
         return ["news"]
     if any(w in q for w in ["p/e", "pe ratio", "price to earnings", "price-to-earnings", "trailing pe", "forward pe"]):
+        return ["financials"]
+    if any(w in q for w in ["cash flow", "cash burn", "fcf", "free cash flow", "runway"]):
+        return ["financials", "calc"]
+    if any(w in q for w in ["current ratio", "interest coverage", "liquidity ratio"]):
+        return ["ratios"]
+    if any(w in q for w in ["price target", "target price", "analyst target"]):
         return ["financials"]
     if any(w in q for w in ["debt", "equity ratio", "d/e", "roa", "roe", "return on"]):
         return ["ratios"]
@@ -83,8 +98,13 @@ def process_turn(
     messages: list[dict],
     persona_system: str | None = None,
 ) -> tuple[str, list[dict]]:
+    today_str = date.today().strftime("%B %d, %Y") if _is_time_sensitive(user_input) else ""
+    today_prefix = f"Today is {today_str}. " if today_str else ""
+    plan_sys = PLAN_SYSTEM.replace("{today}", today_prefix)
+    synth_sys = (persona_system or SYNTHESIS_SYSTEM).replace("{today}", today_prefix)
+
     planning_messages = [
-        {"role": "system", "content": PLAN_SYSTEM},
+        {"role": "system", "content": plan_sys},
         *messages,
         {"role": "user", "content": user_input},
     ]
@@ -130,7 +150,7 @@ def process_turn(
             logging.warning("[Orchestrator] %s agent failed — %s", agent_name, e)
             _log_agent_error(agent_name, e)
 
-    synthesis_system = persona_system or SYNTHESIS_SYSTEM
+    synthesis_system = synth_sys
     synthesis_messages = [{"role": "system", "content": synthesis_system}, *messages]
     synthesis_messages.append({"role": "user", "content": user_input})
     if accumulated_context:
