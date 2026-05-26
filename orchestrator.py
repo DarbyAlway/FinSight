@@ -54,16 +54,16 @@ import re as _re
 _TICKER_RE = _re.compile(r'\b[A-Z]{1,5}\b')
 
 
-def _is_conversational(question: str) -> bool:
+def _is_conversational(question: str) -> bool: # check if it is a normal conversation or not
     q = question.lower()
-    if any(kw in q for kw in _FINANCIAL_KEYWORDS):
+    if any(kw in q for kw in _FINANCIAL_KEYWORDS): # check if its contain a financial keyword or not
         return False
-    if _TICKER_RE.search(question):
+    if _TICKER_RE.search(question): # check if its a ticker pattern
         return False
     return True
 
 
-def _keyword_fallback(question: str) -> list[str]:
+def _keyword_fallback(question: str) -> list[str]: # Check for the specific keyword, so the orchestrator can called the right agents
     q = question.lower()
     if any(w in q for w in ["news", "headline", "article", "latest"]):
         return ["news"]

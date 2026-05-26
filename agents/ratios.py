@@ -6,7 +6,7 @@ import ollama
 from tools.config import MODEL
 from tools.balance_sheet import get_balance_sheet
 from tools.ratios import calculate_all_margins, calculate_debt_to_equity, calculate_roa_roe
-from prompts import RATIOS_SYSTEM as SYSTEM_PROMPT
+from prompts import RATIOS_SYSTEM 
 
 TOOLS = [
     {
@@ -83,7 +83,7 @@ OPT = {"temperature": 0.1}
 
 
 def run(user_question: str, context: str = "", history: list[dict] | None = None) -> str:
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages = [{"role": "system", "content": RATIOS_SYSTEM}]
     if history:
         messages += history[-6:]
     if context:
