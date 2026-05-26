@@ -487,3 +487,46 @@ def test_calculate_cash_runway_from_cache():
     # Runway = 600 / 200 * 12 = 36 months
     assert "36" in result
     assert "600" in result
+
+
+# ---------------------------------------------------------------------------
+# Liquidity ratio tests
+# ---------------------------------------------------------------------------
+
+def test_calculate_current_ratio_from_cache():
+    import time
+    from tools.db import init_db, save_balance_sheet
+    from tools.ratios import calculate_current_ratio
+    init_db()
+    save_balance_sheet([
+        {"ticker": "CRTEST", "fiscal_year": "Dec 31, 2025",
+         "section": "Assets",
+         "line_item": "Total current assets",
+         "value": 300.0, "fetched_at": time.time()},
+        {"ticker": "CRTEST", "fiscal_year": "Dec 31, 2025",
+         "section": "Liabilities",
+         "line_item": "Total current liabilities",
+         "value": 200.0, "fetched_at": time.time()},
+    ])
+    result = calculate_current_ratio("CRTEST")
+    assert "1.50" in result  # 300 / 200 = 1.50
+    assert "Dec 31, 2025" in result
+
+
+def test_calculate_interest_coverage_from_cache():
+    import time
+    from tools.db import init_db, save_to_cache
+    from tools.ratios import calculate_interest_coverage
+    init_db()
+    save_to_cache([
+        {"ticker": "ICTEST", "fiscal_year": "Dec 31, 2025",
+         "section": "Operating",
+         "line_item": "Operating income",
+         "value": 300.0, "fetched_at": time.time()},
+        {"ticker": "ICTEST", "fiscal_year": "Dec 31, 2025",
+         "section": "Other",
+         "line_item": "Interest expense",
+         "value": -60.0, "fetched_at": time.time()},
+    ])
+    result = calculate_interest_coverage("ICTEST")
+    assert "5.0x" in result  # 300 / 60 = 5.0x

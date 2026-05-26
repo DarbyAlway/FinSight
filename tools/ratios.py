@@ -167,3 +167,113 @@ def calculate_roa_roe(ticker: str) -> str:
             f"  {fy:<14} ${net:>10,.0f}M ${assets:>12,.0f}M {equity_str:>12} {roa_str:>8} {roe_str:>8}"
         )
     return "\n".join(lines)
+
+
+def calculate_current_ratio(ticker: str) -> str:
+    with duckdb.connect(DB_PATH) as con:
+        fy_row = con.execute(
+            "SELECT fiscal_year FROM balance_sheets WHERE ticker = ? ORDER BY fiscal_year DESC LIMIT 1",
+            (ticker,)
+        ).fetchone()
+        if not fy_row:
+            return f"ERROR: No balance sheet data for {ticker} — call get_balance_sheet first."
+        fy = fy_row[0]
+
+        ca_row = con.execute(
+            """SELECT value FROM balance_sheets
+               WHERE ticker = ? AND fiscal_year = ?
+               AND lower(line_item) LIKE '%total current assets%'
+               LIMIT 1""",
+            (ticker, fy)
+        ).fetchone()
+        cl_row = con.execute(
+            """SELECT value FROM balance_sheets
+               WHERE ticker = ? AND fiscal_year = ?
+               AND lower(line_item) LIKE '%total current liabilities%'
+               LIMIT 1""",
+            (ticker, fy)
+        ).fetchone()
+
+    if not ca_row:
+        return f"ERROR: Total current assets not found for {ticker} — call get_balance_sheet first."
+    if not cl_row:
+        return f"ERROR: Total current liabilities not found for {ticker} — call get_balance_sheet first."
+
+    current_assets = ca_row[0]
+    current_liabilities = cl_row[0]
+    if current_liabilities == 0:
+        return f"ERROR: Current liabilities is zero for {ticker} — cannot compute current ratio."
+
+    ratio = current_assets / current_liabilities
+    if ratio >= 1.5:
+        health = "healthy"
+    elif ratio >= 1.0:
+        health = "adequate"
+    else:
+        health = "potential short-term liquidity risk"
+
+    return (
+        f"{ticker} Current Ratio (SEC 10-K, {fy}):\n"
+        f"  Total current assets:      ${current_assets:,.0f}M\n"
+        f"  Total current liabilities: ${current_liabilities:,.0f}M\n"
+        f"  Current ratio: {ratio:.2f}  ({health}; > 1.5 = healthy, < 1.0 = liquidity risk)"
+    )
+
+
+def calculate_interest_coverage(ticker: str) -> str:
+    ebit_rows = fuzzy_query(ticker, "operating income")
+    if not ebit_rows:
+        return f"ERROR: No operating income data for {ticker} — call get_income_statement first."
+
+    with duckdb.connect(DB_PATH) as con:
+        interest_rows = con.execute(
+            """SELECT fiscal_year, value FROM income_statements
+               WHERE ticker = ?
+               AND lower(line_item) LIKE '%interest expense%'
+               ORDER BY fiscal_year DESC LIMIT 2""",
+            (ticker,)
+        ).fetchall()
+
+    if not interest_rows:
+        return (
+            f"ERROR: Interest expense not found for {ticker} "
+            "— call get_income_statement first."
+        )
+
+    ebit_by_year: dict[str, float] = {}
+    for r in ebit_rows:
+        fy = r["fiscal_year"]
+        if fy not in ebit_by_year:
+            ebit_by_year[fy] = r["value"]
+
+    interest_by_year = {r[0]: r[1] for r in interest_rows}
+    common_years = sorted(
+        set(ebit_by_year.keys()) & set(interest_by_year.keys()),
+        key=_parse_fiscal_year, reverse=True
+    )
+
+    if not common_years:
+        return (
+            f"ERROR: No overlapping years between operating income and "
+            f"interest expense for {ticker}."
+        )
+
+    lines = [f"{ticker} Interest Coverage (SEC 10-K):"]
+    for fy in common_years:
+        ebit = ebit_by_year[fy]
+        interest = interest_by_year[fy]
+        if interest == 0:
+            lines.append(f"  {fy}: Interest expense = $0M (no debt servicing)")
+            continue
+        coverage = ebit / abs(interest)
+        if coverage >= 3.0:
+            health = "comfortable"
+        elif coverage >= 1.5:
+            health = "adequate"
+        else:
+            health = "potential solvency risk"
+        lines.append(
+            f"  {fy}: EBIT ${ebit:,.0f}M / Interest ${abs(interest):,.0f}M"
+            f" = {coverage:.1f}x ({health})"
+        )
+    return "\n".join(lines)
