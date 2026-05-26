@@ -2,11 +2,39 @@
 VERSION = "1.3.0"
 
 # ---------------------------------------------------------------------------
+# Time-sensitivity detection
+# ---------------------------------------------------------------------------
+
+TIME_SENSITIVE_KEYWORDS = {
+    "yesterday","today", "now", "current", "currently", "latest", "recent", "recently","tomorrow",
+    "new", "newest", "updated", "just", "fresh",
+    "this year", "this quarter", "this month", "this week",
+    "last year", "last quarter", "last month", "last week",
+    "past year", "past quarter", "past month",
+    "previous year", "previous quarter",
+    "prior year", "prior quarter",
+    "ytd", "ttm", "trailing",
+    "2026", "2025", "2024",
+    "q1", "q2", "q3", "q4",
+    "earnings", "report", "reported", "filing", "filed",
+    "announced", "announcement", "released", "release",
+    "guidance", "outlook", "forecast", "projection", "estimate",
+    "beat", "miss", "surprise",
+    "next", "upcoming", "future", "projected",
+    "rally", "surge", "drop", "crash", "spike", "fell", "rose",
+    "momentum", "trend", "trending",
+    "runway", "burn", "burn rate", "liquidity",
+    "how old", "stale", "outdated", "when was",
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+}
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
 PLAN_SYSTEM = (
-    "You are a stock analysis orchestrator. Given the user's question, output a JSON plan "
+    "{today}You are a stock analysis orchestrator. Given the user's question, output a JSON plan "
     "with the agents to call and the tickers involved. "
     "Available agents: "
     "'financials' (income statements, quarterly results, company market info, P/E ratio, EPS, market cap, beta — "
@@ -29,7 +57,7 @@ PLAN_SYSTEM = (
 )
 
 SYNTHESIS_SYSTEM = (
-    "You are a stock analysis assistant. "
+    "{today}You are a stock analysis assistant. "
     "Synthesise the agent outputs below into a clear, direct answer. "
     "Cite which agent/tool provided each fact. "
     "Only state facts that came from agent outputs. "
