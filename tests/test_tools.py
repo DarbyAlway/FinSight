@@ -265,3 +265,67 @@ def test_parse_balance_sheet_applies_thousands_multiplier():
     rows = parse_balance_sheet("TEST", sample)
     asset_row = next(r for r in rows if r["line_item"] == "Total assets")
     assert asset_row["value"] == 2000.0
+
+
+# ---------------------------------------------------------------------------
+# tools/ratios.py tests
+# ---------------------------------------------------------------------------
+
+def test_calculate_all_margins_from_cache():
+    import time
+    from tools.db import init_db, save_to_cache
+    from tools.ratios import calculate_all_margins
+    init_db()
+    save_to_cache([
+        {"ticker": "MARGINTEST", "fiscal_year": "Dec 31, 2025", "section": "Revenue",
+         "line_item": "Net sales", "value": 1000.0, "fetched_at": time.time()},
+        {"ticker": "MARGINTEST", "fiscal_year": "Dec 31, 2025", "section": "Gross",
+         "line_item": "Gross profit", "value": 400.0, "fetched_at": time.time()},
+        {"ticker": "MARGINTEST", "fiscal_year": "Dec 31, 2025", "section": "Net",
+         "line_item": "Net income", "value": 100.0, "fetched_at": time.time()},
+    ])
+    result = calculate_all_margins("MARGINTEST")
+    assert "40.0%" in result  # gross margin 400/1000
+    assert "10.0%" in result  # net margin 100/1000
+
+
+def test_calculate_debt_to_equity_from_cache():
+    import time
+    from tools.db import init_db, save_balance_sheet
+    from tools.ratios import calculate_debt_to_equity
+    init_db()
+    save_balance_sheet([
+        {"ticker": "DTETEST", "fiscal_year": "Dec 31, 2025", "section": "Liabilities",
+         "line_item": "Long-term debt", "value": 150.0, "fetched_at": time.time()},
+        {"ticker": "DTETEST", "fiscal_year": "Dec 31, 2025", "section": "Equity",
+         "line_item": "Total stockholders equity", "value": 1700.0, "fetched_at": time.time()},
+    ])
+    result = calculate_debt_to_equity("DTETEST")
+    assert "0.088" in result  # 150/1700 = 0.0882
+    assert "Dec 31, 2025" in result
+
+
+def test_calculate_roa_roe_from_cache():
+    import time
+    from tools.db import init_db, save_to_cache, save_balance_sheet
+    from tools.ratios import calculate_roa_roe
+    init_db()
+    save_to_cache([
+        {"ticker": "ROATEST", "fiscal_year": "Dec 31, 2025", "section": "Net",
+         "line_item": "Net income", "value": 200.0, "fetched_at": time.time()},
+    ])
+    save_balance_sheet([
+        {"ticker": "ROATEST", "fiscal_year": "Dec 31, 2025", "section": "Assets",
+         "line_item": "Total assets", "value": 2000.0, "fetched_at": time.time()},
+        {"ticker": "ROATEST", "fiscal_year": "Dec 31, 2025", "section": "Equity",
+         "line_item": "Total stockholders equity", "value": 1000.0, "fetched_at": time.time()},
+    ])
+    result = calculate_roa_roe("ROATEST")
+    assert "10.0%" in result   # ROA = 200/2000
+    assert "20.0%" in result   # ROE = 200/1000
+
+
+def test_calculate_debt_to_equity_missing_data():
+    from tools.ratios import calculate_debt_to_equity
+    result = calculate_debt_to_equity("ZZZNOTREAL_DTE")
+    assert result.startswith("ERROR:")
