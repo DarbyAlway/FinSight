@@ -7,6 +7,7 @@ import duckdb
 from tools.config import DB_PATH, CACHE_TTL_DAYS, TICKER_INFO_TTL_HOURS, SYNONYMS
 
 QUARTERLY_TTL_DAYS = 7
+EARNINGS_TTL_DAYS = 7
 
 
 def init_db():
@@ -73,6 +74,20 @@ def init_db():
                 value       DOUBLE,
                 fetched_at  DOUBLE,
                 PRIMARY KEY (ticker, fiscal_year, section, line_item)
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS earnings_releases (
+                ticker            VARCHAR,
+                period_end        VARCHAR,
+                eps_actual        DOUBLE,
+                eps_estimate      DOUBLE,
+                revenue_actual    DOUBLE,
+                revenue_estimate  DOUBLE,
+                beat_miss         VARCHAR,
+                guidance_text     VARCHAR,
+                fetched_at        DOUBLE,
+                PRIMARY KEY (ticker, period_end)
             )
         """)
 
@@ -337,4 +352,65 @@ def load_cash_flow(ticker: str) -> str:
             lines.append(f"    {section}")
             current_section = section
         lines.append(f"      {line_item}: ${value:,.0f}M")
+    return "\n".join(lines)
+
+
+def is_earnings_fresh(ticker: str) -> bool:
+    with duckdb.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT fetched_at FROM earnings_releases WHERE ticker = ? LIMIT 1",
+            (ticker,)
+        ).fetchone()
+    if row is None:
+        return False
+    return (time.time() - row[0]) / 86400 < EARNINGS_TTL_DAYS
+
+
+def save_earnings(rows: list[dict]):
+    if not rows:
+        return
+    with duckdb.connect(DB_PATH) as con:
+        con.executemany(
+            """INSERT OR REPLACE INTO earnings_releases
+               (ticker, period_end, eps_actual, eps_estimate, revenue_actual,
+                revenue_estimate, beat_miss, guidance_text, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [(r["ticker"], r["period_end"], r["eps_actual"], r["eps_estimate"],
+              r.get("revenue_actual"), r.get("revenue_estimate"),
+              r["beat_miss"], r.get("guidance_text"), r["fetched_at"]) for r in rows],
+        )
+
+
+def load_earnings(ticker: str) -> str:
+    with duckdb.connect(DB_PATH) as con:
+        rows = con.execute(
+            """SELECT period_end, eps_actual, eps_estimate, beat_miss,
+                      revenue_actual, guidance_text
+               FROM earnings_releases
+               WHERE ticker = ?
+               ORDER BY period_end DESC
+               LIMIT 4""",
+            (ticker,)
+        ).fetchall()
+    if not rows:
+        return ""
+    lines = [f"{ticker} Earnings (last {len(rows)} quarters)"]
+    for period_end, eps_actual, eps_estimate, beat_miss, revenue_actual, guidance_text in rows:
+        try:
+            from datetime import datetime as _dt
+            dt = _dt.strptime(period_end, "%Y-%m-%d")
+            label = f"Q{(dt.month - 1) // 3 + 1} {dt.year} ({dt.strftime('%b %d, %Y')})"
+        except Exception:
+            label = period_end
+        pct = ""
+        if eps_estimate and eps_estimate != 0:
+            pct = f" ({(eps_actual - eps_estimate) / abs(eps_estimate) * 100:+.1f}%)"
+        lines.append(f"\n  {label}")
+        lines.append(f"    EPS: ${eps_actual:.2f} actual | ${eps_estimate:.2f} estimate | {beat_miss.upper()}{pct}")
+        if revenue_actual:
+            lines.append(f"    Revenue: ${revenue_actual:,.0f}M actual")
+        if guidance_text:
+            lines.append(f"    Guidance: \"{guidance_text}\"")
+        else:
+            lines.append("    Guidance: (not available)")
     return "\n".join(lines)

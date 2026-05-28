@@ -586,3 +586,78 @@ def test_get_company_info_includes_price_targets_and_multiples():
     assert "3.2" in result       # P/B
     assert "Price Targets" in result
     assert "P/S" in result
+
+
+# ---------------------------------------------------------------------------
+# Earnings releases DB tests
+# ---------------------------------------------------------------------------
+
+def test_init_db_creates_earnings_releases_table():
+    from tools.db import init_db
+    from tools.config import DB_PATH
+    init_db()
+    import duckdb
+    with duckdb.connect(DB_PATH) as con:
+        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+    assert "earnings_releases" in tables
+
+
+def test_save_and_load_earnings_roundtrip():
+    import time
+    from tools.db import init_db, save_earnings, load_earnings
+    init_db()
+    rows = [
+        {
+            "ticker": "EARNTEST",
+            "period_end": "2024-09-30",
+            "eps_actual": 1.64,
+            "eps_estimate": 1.60,
+            "revenue_actual": None,
+            "revenue_estimate": None,
+            "beat_miss": "beat",
+            "guidance_text": "We expect revenue of $89-93B next quarter.",
+            "fetched_at": time.time(),
+        },
+        {
+            "ticker": "EARNTEST",
+            "period_end": "2024-06-30",
+            "eps_actual": 1.40,
+            "eps_estimate": 1.45,
+            "revenue_actual": None,
+            "revenue_estimate": None,
+            "beat_miss": "miss",
+            "guidance_text": None,
+            "fetched_at": time.time(),
+        },
+    ]
+    save_earnings(rows)
+    result = load_earnings("EARNTEST")
+    assert "EARNTEST Earnings" in result
+    assert "BEAT" in result
+    assert "MISS" in result
+    assert "We expect revenue" in result
+    assert "(not available)" in result
+
+
+def test_is_earnings_fresh_returns_false_when_empty():
+    from tools.db import init_db, is_earnings_fresh
+    init_db()
+    assert is_earnings_fresh("ZZZNOTREAL_EARN") is False
+
+
+def test_is_earnings_fresh_returns_true_after_save():
+    import time
+    from tools.db import init_db, save_earnings, is_earnings_fresh
+    init_db()
+    save_earnings([{
+        "ticker": "FRESHTEST",
+        "period_end": "2024-09-30",
+        "eps_actual": 1.0,
+        "eps_estimate": 1.0,
+        "revenue_actual": None,
+        "revenue_estimate": None,
+        "beat_miss": "in-line",
+        "guidance_text": None,
+        "fetched_at": time.time(),
+    }])
+    assert is_earnings_fresh("FRESHTEST") is True
