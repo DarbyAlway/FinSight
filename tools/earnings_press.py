@@ -85,11 +85,20 @@ def _fetch_next_earnings_date(ticker: str) -> str | None:
         cal = yf.Ticker(ticker).calendar
         if cal is None:
             return None
-        # calendar may be a dict or DataFrame depending on yfinance version
         if isinstance(cal, dict):
             dates = cal.get("Earnings Date") or cal.get("Earnings Dates")
             if dates and len(dates) > 0:
                 return str(dates[0])[:10]
+        else:
+            # DataFrame variant (newer yfinance versions)
+            try:
+                import pandas as pd
+                if isinstance(cal, pd.DataFrame) and not cal.empty:
+                    for col in ("Earnings Date", "Earnings Dates"):
+                        if col in cal.columns:
+                            return str(cal[col].iloc[0])[:10]
+            except Exception:
+                pass
         return None
     except Exception:
         return None
