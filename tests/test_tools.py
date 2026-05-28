@@ -750,3 +750,58 @@ def test_fetch_edgar_guidance_returns_string_or_none():
     result = _fetch_edgar_guidance("AAPL")
     # Must return a non-empty string or None — never raises
     assert result is None or (isinstance(result, str) and len(result) > 0)
+
+
+# ---------------------------------------------------------------------------
+# get_earnings_press_release integration tests
+# ---------------------------------------------------------------------------
+
+def test_get_earnings_press_release_returns_string():
+    from tools.db import init_db
+    from tools.earnings_press import get_earnings_press_release
+    init_db()
+    result = get_earnings_press_release("AAPL")
+    assert isinstance(result, str)
+    assert len(result) > 0
+
+
+def test_get_earnings_press_release_contains_beat_miss():
+    from tools.db import init_db
+    from tools.earnings_press import get_earnings_press_release
+    init_db()
+    result = get_earnings_press_release("AAPL")
+    assert any(word in result.upper() for word in ["BEAT", "MISS", "IN-LINE"])
+
+
+def test_get_earnings_press_release_cache_hit():
+    import time
+    from tools.db import init_db, save_earnings, is_earnings_fresh
+    from tools.earnings_press import get_earnings_press_release
+    init_db()
+    save_earnings([{
+        "ticker": "CACHEHIT",
+        "period_end": "2024-09-30",
+        "eps_actual": 2.00,
+        "eps_estimate": 1.90,
+        "revenue_actual": None,
+        "revenue_estimate": None,
+        "beat_miss": "beat",
+        "guidance_text": "Strong guidance ahead.",
+        "fetched_at": time.time(),
+    }])
+    assert is_earnings_fresh("CACHEHIT") is True
+    result = get_earnings_press_release("CACHEHIT")
+    assert "CACHEHIT" in result
+    assert "BEAT" in result
+    assert "Strong guidance ahead" in result
+
+
+def test_get_earnings_press_release_edgar_failure_still_returns_eps():
+    from unittest.mock import patch
+    from tools.db import init_db
+    from tools.earnings_press import get_earnings_press_release
+    init_db()
+    with patch("tools.earnings_press._fetch_edgar_guidance", return_value=None):
+        result = get_earnings_press_release("MSFT")
+    assert isinstance(result, str)
+    assert any(word in result.upper() for word in ["BEAT", "MISS", "IN-LINE"])

@@ -78,3 +78,55 @@ def _fetch_edgar_guidance(ticker: str) -> str | None:
     except Exception as e:
         logging.warning("_fetch_edgar_guidance failed for %s: %s", ticker, e)
         return None
+
+
+def _fetch_next_earnings_date(ticker: str) -> str | None:
+    try:
+        cal = yf.Ticker(ticker).calendar
+        if cal is None:
+            return None
+        # calendar may be a dict or DataFrame depending on yfinance version
+        if isinstance(cal, dict):
+            dates = cal.get("Earnings Date") or cal.get("Earnings Dates")
+            if dates and len(dates) > 0:
+                return str(dates[0])[:10]
+        return None
+    except Exception:
+        return None
+
+
+def get_earnings_press_release(ticker: str) -> str:
+    try:
+        if is_earnings_fresh(ticker):
+            logging.info("earnings cache hit: %s", ticker)
+            base = load_earnings(ticker)
+            next_date = _fetch_next_earnings_date(ticker)
+            if next_date:
+                return f"Next earnings: ~{next_date}\n{base}"
+            return base
+
+        rows = _fetch_yfinance_earnings(ticker)
+        if not rows:
+            return (
+                f"TOOL_ERROR: No earnings history found for {ticker}. "
+                "Do not use training data to answer — tell the user the data is unavailable."
+            )
+
+        guidance = _fetch_edgar_guidance(ticker)
+        if guidance:
+            rows[0]["guidance_text"] = guidance
+
+        save_earnings(rows)
+        base = load_earnings(ticker)
+        next_date = _fetch_next_earnings_date(ticker)
+        if next_date:
+            return f"Next earnings: ~{next_date}\n{base}"
+        return base
+    except Exception as e:
+        stale = load_earnings(ticker)
+        if stale:
+            return f"[Stale cache] {stale}\n(Refresh failed: {e})"
+        return (
+            f"TOOL_ERROR: Failed to fetch earnings data for {ticker}: {e}. "
+            "Do not use training data to answer — tell the user the data is unavailable."
+        )
