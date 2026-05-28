@@ -28,6 +28,7 @@ from agents.news import run as run_news
 from agents.calc import run as run_calc
 from agents.ratios import run as run_ratios
 from prompts import PLAN_SYSTEM, SYNTHESIS_SYSTEM, TIME_SENSITIVE_KEYWORDS
+from tools.search_guardrails import is_uncertain, _web_search_with_sources
 
 OPT_PLAN = {"temperature": 0.0}
 OPT_SYNTH = {"temperature": 0.3}
@@ -166,6 +167,18 @@ def process_turn(
     t2 = time.time()
     synthesis_response = ollama.chat(model=MODEL, messages=synthesis_messages, options=OPT_SYNTH)
     answer = synthesis_response.message.content or ""
+    if is_uncertain(answer):
+        snippets, urls = _web_search_with_sources(user_input)
+        if snippets:
+            web_messages = synthesis_messages + [{
+                "role": "user",
+                "content": f"Web search results:\n{snippets}\n\nUse these to answer the question.",
+            }]
+            web_response = ollama.chat(model=MODEL, messages=web_messages, options=OPT_SYNTH)
+            answer = web_response.message.content or answer
+            if urls:
+                answer += "\n\n**Web sources:**\n" + "\n".join(f"- {url}" for url in urls)
+            logging.info("[Orchestrator] Tavily fallback used (%d sources)", len(urls))
     logging.info("[timing] synthesis call: %.2fs", time.time() - t2)
     logging.info("[timing] total turn: %.2fs", time.time() - t0)
 

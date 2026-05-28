@@ -134,3 +134,59 @@ def test_agent_failure_is_skipped_gracefully():
         result, _ = process_turn("AAPL news and financials", [])
 
     assert isinstance(result, str)
+
+
+def test_tavily_fallback_triggered_when_uncertain():
+    from orchestrator import process_turn
+
+    uncertain_answer = "I don't have sufficient data to answer this."
+    enriched_answer = "Based on web results, AAPL revenue was $94B."
+
+    with patch("orchestrator._is_conversational", return_value=True), \
+         patch("orchestrator.is_uncertain", return_value=True), \
+         patch("orchestrator._web_search_with_sources",
+               return_value=("Apple revenue was $94B per Reuters.", ["https://reuters.com/aapl"])), \
+         patch("orchestrator.ollama.chat", side_effect=[
+             _ollama_response(uncertain_answer),   # synthesis
+             _ollama_response(enriched_answer),    # re-synthesis with Tavily context
+         ]):
+        result, _ = process_turn("What is AAPL revenue?", [])
+
+    assert "https://reuters.com/aapl" in result
+    assert "Web sources" in result
+
+
+def test_tavily_fallback_skipped_when_confident():
+    from unittest.mock import MagicMock
+    from orchestrator import process_turn
+
+    confident_answer = "AAPL P/E ratio is 28x based on trailing twelve months."
+
+    mock_search = MagicMock()
+    with patch("orchestrator._is_conversational", return_value=True), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator._web_search_with_sources", mock_search), \
+         patch("orchestrator.ollama.chat", side_effect=[
+             _ollama_response(confident_answer),
+         ]):
+        result, _ = process_turn("What is AAPL P/E?", [])
+
+    mock_search.assert_not_called()
+    assert result == confident_answer
+
+
+def test_tavily_fallback_skipped_when_empty_results():
+    from orchestrator import process_turn
+
+    uncertain_answer = "I'm not certain about that."
+
+    with patch("orchestrator._is_conversational", return_value=True), \
+         patch("orchestrator.is_uncertain", return_value=True), \
+         patch("orchestrator._web_search_with_sources", return_value=("", [])), \
+         patch("orchestrator.ollama.chat", side_effect=[
+             _ollama_response(uncertain_answer),
+         ]):
+        result, _ = process_turn("What is AAPL revenue?", [])
+
+    assert result == uncertain_answer
+    assert "Web sources" not in result
