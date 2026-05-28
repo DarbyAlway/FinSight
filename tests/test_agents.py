@@ -68,5 +68,6 @@ def test_calc_agent_only_has_calc_tools():
         "calculate_dcf", "calculate_peg", "calculate_pe_vs_sector",
         "calculate_revenue_cagr", "calculate_margin_trend", "calculate_yoy",
         "calculate_correlation", "rank_tickers", "get_price_history",
+        "calculate_free_cash_flow", "calculate_cash_runway",
     }
     assert set(TOOL_FUNCTIONS.keys()) == expected
