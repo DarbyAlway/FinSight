@@ -805,3 +805,19 @@ def test_get_earnings_press_release_edgar_failure_still_returns_eps():
         result = get_earnings_press_release("MSFT")
     assert isinstance(result, str)
     assert any(word in result.upper() for word in ["BEAT", "MISS", "IN-LINE"])
+
+
+# ---------------------------------------------------------------------------
+# Financials agent — earnings tool wiring
+# ---------------------------------------------------------------------------
+
+def test_financials_agent_has_earnings_tool():
+    from agents.financials import TOOLS
+    names = [t["function"]["name"] for t in TOOLS]
+    assert "get_earnings_press_release" in names
+
+
+def test_financials_agent_earnings_tool_function_is_wired():
+    from agents.financials import TOOL_FUNCTIONS
+    assert "get_earnings_press_release" in TOOL_FUNCTIONS
+    assert callable(TOOL_FUNCTIONS["get_earnings_press_release"])

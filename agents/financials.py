@@ -7,6 +7,7 @@ from tools.config import MODEL
 from tools.income import get_income_statement, get_quarterly_statement
 from tools.company import get_company_info
 from tools.cash_flow import get_cash_flow_statement
+from tools.earnings_press import get_earnings_press_release
 from prompts import FINANCIALS_SYSTEM as SYSTEM_PROMPT
 
 TOOLS = [
@@ -62,6 +63,24 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_earnings_press_release",
+            "description": (
+                "Fetch the last 4 quarters of earnings results for a ticker: "
+                "EPS actual vs estimate, beat/miss classification, and management guidance text. "
+                "Use for: did the company beat expectations, earnings surprise history, "
+                "management guidance, analyst estimate vs actual EPS, recent guidance, "
+                "next earnings date."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"ticker": {"type": "string"}},
+                "required": ["ticker"],
+            },
+        },
+    },
 ]
 
 TOOL_FUNCTIONS = {
@@ -69,6 +88,7 @@ TOOL_FUNCTIONS = {
     "get_quarterly_statement": get_quarterly_statement,
     "get_company_info": get_company_info,
     "get_cash_flow_statement": get_cash_flow_statement,
+    "get_earnings_press_release": get_earnings_press_release,
 }
 
 OPT = {"temperature": 0.1}
