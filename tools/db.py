@@ -1,6 +1,7 @@
 import hashlib
 import json
 import time
+from datetime import datetime
 
 import duckdb
 
@@ -358,7 +359,7 @@ def load_cash_flow(ticker: str) -> str:
 def is_earnings_fresh(ticker: str) -> bool:
     with duckdb.connect(DB_PATH) as con:
         row = con.execute(
-            "SELECT fetched_at FROM earnings_releases WHERE ticker = ? LIMIT 1",
+            "SELECT fetched_at FROM earnings_releases WHERE ticker = ? ORDER BY fetched_at DESC LIMIT 1",
             (ticker,)
         ).fetchone()
     if row is None:
@@ -397,16 +398,17 @@ def load_earnings(ticker: str) -> str:
     lines = [f"{ticker} Earnings (last {len(rows)} quarters)"]
     for period_end, eps_actual, eps_estimate, beat_miss, revenue_actual, guidance_text in rows:
         try:
-            from datetime import datetime as _dt
-            dt = _dt.strptime(period_end, "%Y-%m-%d")
+            dt = datetime.strptime(period_end, "%Y-%m-%d")
             label = f"Q{(dt.month - 1) // 3 + 1} {dt.year} ({dt.strftime('%b %d, %Y')})"
         except Exception:
             label = period_end
         pct = ""
-        if eps_estimate and eps_estimate != 0:
+        if eps_estimate:
             pct = f" ({(eps_actual - eps_estimate) / abs(eps_estimate) * 100:+.1f}%)"
         lines.append(f"\n  {label}")
-        lines.append(f"    EPS: ${eps_actual:.2f} actual | ${eps_estimate:.2f} estimate | {beat_miss.upper()}{pct}")
+        eps_str = f"${eps_actual:.2f}" if eps_actual is not None else "N/A"
+        est_str = f"${eps_estimate:.2f}" if eps_estimate is not None else "N/A"
+        lines.append(f"    EPS: {eps_str} actual | {est_str} estimate | {beat_miss.upper()}{pct}")
         if revenue_actual:
             lines.append(f"    Revenue: ${revenue_actual:,.0f}M actual")
         if guidance_text:
