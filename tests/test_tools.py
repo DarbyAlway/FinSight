@@ -661,3 +661,58 @@ def test_is_earnings_fresh_returns_true_after_save():
         "fetched_at": time.time(),
     }])
     assert is_earnings_fresh("FRESHTEST") is True
+
+
+# ---------------------------------------------------------------------------
+# earnings_press pure function tests
+# ---------------------------------------------------------------------------
+
+def test_parse_beat_miss_beat():
+    from tools.earnings_press import _parse_beat_miss
+    assert _parse_beat_miss(1.64, 1.60) == "beat"
+
+
+def test_parse_beat_miss_miss():
+    from tools.earnings_press import _parse_beat_miss
+    assert _parse_beat_miss(1.50, 1.60) == "miss"
+
+
+def test_parse_beat_miss_inline():
+    from tools.earnings_press import _parse_beat_miss
+    assert _parse_beat_miss(1.61, 1.60) == "in-line"  # +0.6% < 2% threshold
+
+
+def test_parse_beat_miss_zero_estimate():
+    from tools.earnings_press import _parse_beat_miss
+    assert _parse_beat_miss(1.64, 0) == "in-line"
+
+
+def test_extract_guidance_text_finds_guidance():
+    from tools.earnings_press import _extract_guidance_text
+    text = (
+        "Revenue was $94B in Q3. "
+        "We expect revenue in the range of $89-93 billion for Q4. "
+        "Strong demand continues across all segments."
+    )
+    result = _extract_guidance_text(text)
+    assert result is not None
+    assert "expect" in result.lower()
+
+
+def test_extract_guidance_text_finds_outlook():
+    from tools.earnings_press import _extract_guidance_text
+    text = (
+        "Net income increased 12% year-over-year. "
+        "Our outlook for fiscal 2025 remains positive with guidance of $6.50-6.80 EPS. "
+        "We anticipate continued margin expansion."
+    )
+    result = _extract_guidance_text(text)
+    assert result is not None
+    assert len(result) > 0
+
+
+def test_extract_guidance_text_returns_none_when_no_guidance():
+    from tools.earnings_press import _extract_guidance_text
+    text = "Revenue was $94B in Q3. Operating income increased 10%. Margins improved."
+    result = _extract_guidance_text(text)
+    assert result is None
