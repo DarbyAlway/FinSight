@@ -821,3 +821,51 @@ def test_financials_agent_earnings_tool_function_is_wired():
     from agents.financials import TOOL_FUNCTIONS
     assert "get_earnings_press_release" in TOOL_FUNCTIONS
     assert callable(TOOL_FUNCTIONS["get_earnings_press_release"])
+
+
+# ---------------------------------------------------------------------------
+# _web_search_with_sources tests
+# ---------------------------------------------------------------------------
+
+def test_web_search_with_sources_returns_snippets_and_urls():
+    from unittest.mock import patch, MagicMock
+    from tools.search_guardrails import _web_search_with_sources
+
+    mock_result = {
+        "results": [
+            {"content": "Apple reported strong earnings.", "url": "https://reuters.com/aapl"},
+            {"content": "iPhone sales beat estimates.", "url": "https://bloomberg.com/aapl"},
+        ]
+    }
+    with patch("tools.search_guardrails.os.getenv", return_value="test-key"), \
+         patch("tools.search_guardrails.TavilyClient") as mock_client:
+        mock_client.return_value.search.return_value = mock_result
+        snippets, urls = _web_search_with_sources("AAPL earnings")
+
+    assert "Apple reported strong earnings" in snippets
+    assert "https://reuters.com/aapl" in urls
+    assert "https://bloomberg.com/aapl" in urls
+    assert len(urls) == 2
+
+
+def test_web_search_with_sources_returns_empty_when_no_api_key():
+    from unittest.mock import patch
+    from tools.search_guardrails import _web_search_with_sources
+
+    with patch("tools.search_guardrails.os.getenv", return_value=None):
+        snippets, urls = _web_search_with_sources("AAPL earnings")
+
+    assert snippets == ""
+    assert urls == []
+
+
+def test_web_search_with_sources_returns_empty_on_exception():
+    from unittest.mock import patch
+    from tools.search_guardrails import _web_search_with_sources
+
+    with patch("tools.search_guardrails.os.getenv", return_value="test-key"), \
+         patch("tools.search_guardrails.TavilyClient", side_effect=Exception("API error")):
+        snippets, urls = _web_search_with_sources("AAPL earnings")
+
+    assert snippets == ""
+    assert urls == []

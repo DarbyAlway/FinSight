@@ -3,6 +3,11 @@ import os
 
 import numpy as np
 
+try:
+    from tavily import TavilyClient
+except ImportError:
+    TavilyClient = None
+
 _UNCERTAIN_ANCHORS = [
     "I don't have sufficient data to answer this.",
     "I don't know the answer to that.",
@@ -179,3 +184,22 @@ def web_search_fallback(query: str) -> str:
     except Exception as e:
         logging.warning("Tavily search failed: %s", e)
         return ""
+
+
+def _web_search_with_sources(query: str) -> tuple[str, list[str]]:
+    api_key = os.getenv("TAVILY_API_KEY")
+    if not api_key:
+        logging.warning("_web_search_with_sources: TAVILY_API_KEY not set, skipping")
+        return "", []
+    try:
+        import time as _time
+        t0 = _time.perf_counter()
+        result = TavilyClient(api_key).search(query, max_results=3)
+        results = result.get("results", [])
+        snippets = "\n\n".join(r.get("content", "") for r in results)
+        urls = [r.get("url", "") for r in results if r.get("url")]
+        logging.info("_web_search_with_sources('%s') → %.2fs (%d results)", query, _time.perf_counter() - t0, len(results))
+        return snippets, urls
+    except Exception as e:
+        logging.warning("_web_search_with_sources failed: %s", e)
+        return "", []
