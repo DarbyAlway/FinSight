@@ -716,3 +716,37 @@ def test_extract_guidance_text_returns_none_when_no_guidance():
     text = "Revenue was $94B in Q3. Operating income increased 10%. Margins improved."
     result = _extract_guidance_text(text)
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# earnings_press fetcher tests (real API — requires internet)
+# ---------------------------------------------------------------------------
+
+def test_fetch_yfinance_earnings_returns_rows():
+    from tools.earnings_press import _fetch_yfinance_earnings
+    rows = _fetch_yfinance_earnings("AAPL")
+    assert isinstance(rows, list)
+    assert len(rows) > 0
+    for r in rows:
+        assert "ticker" in r and r["ticker"] == "AAPL"
+        assert "period_end" in r
+        assert "eps_actual" in r
+        assert "eps_estimate" in r
+        assert r["beat_miss"] in ("beat", "miss", "in-line")
+
+
+def test_fetch_yfinance_earnings_period_end_is_iso_date():
+    from tools.earnings_press import _fetch_yfinance_earnings
+    rows = _fetch_yfinance_earnings("MSFT")
+    assert len(rows) > 0
+    for r in rows:
+        # period_end must be parseable as YYYY-MM-DD
+        parts = r["period_end"].split("-")
+        assert len(parts) == 3 and len(parts[0]) == 4
+
+
+def test_fetch_edgar_guidance_returns_string_or_none():
+    from tools.earnings_press import _fetch_edgar_guidance
+    result = _fetch_edgar_guidance("AAPL")
+    # Must return a non-empty string or None — never raises
+    assert result is None or (isinstance(result, str) and len(result) > 0)

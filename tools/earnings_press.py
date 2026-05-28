@@ -31,3 +31,50 @@ def _extract_guidance_text(text: str) -> str | None:
             if len(found) >= 2:
                 break
     return " ".join(found) if found else None
+
+
+def _fetch_yfinance_earnings(ticker: str) -> list[dict]:
+    t = yf.Ticker(ticker)
+    try:
+        hist = t.earnings_history
+    except Exception:
+        hist = None
+
+    if hist is None or (hasattr(hist, "empty") and hist.empty):
+        return []
+
+    rows = []
+    now = time.time()
+    for period_end, row in list(hist.iterrows())[:4]:
+        eps_actual = float(row.get("epsActual") or 0)
+        eps_estimate = float(row.get("epsEstimate") or 0)
+        pe_str = str(period_end.date()) if hasattr(period_end, "date") else str(period_end)[:10]
+        rows.append({
+            "ticker": ticker,
+            "period_end": pe_str,
+            "eps_actual": eps_actual,
+            "eps_estimate": eps_estimate,
+            "revenue_actual": None,
+            "revenue_estimate": None,
+            "beat_miss": _parse_beat_miss(eps_actual, eps_estimate),
+            "guidance_text": None,
+            "fetched_at": now,
+        })
+    return rows
+
+
+def _fetch_edgar_guidance(ticker: str) -> str | None:
+    try:
+        company = Company(ticker)
+        filings = company.get_filings(form="8-K")
+        if not filings:
+            return None
+        filing = filings[0]
+        try:
+            text = str(filing.document)
+        except Exception:
+            text = str(filing)
+        return _extract_guidance_text(text)
+    except Exception as e:
+        logging.warning("_fetch_edgar_guidance failed for %s: %s", ticker, e)
+        return None
