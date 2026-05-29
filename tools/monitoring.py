@@ -95,6 +95,20 @@ def record_turn(agents_called: list[str], duration_ms: int):
     )
 
 
+def record_token_usage(agent_name: str, prompt_tokens: int, completion_tokens: int):
+    _append_to(
+        f"app_events_{_today()}.json",
+        {
+            "event": "token_usage",
+            "agent": agent_name,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+            "ts": _now_ts(),
+        },
+    )
+
+
 def get_stats() -> dict:
     with _lock:
         return {

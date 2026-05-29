@@ -3,7 +3,7 @@ import time
 import logging
 
 from tools.llm import _get_client
-from tools.monitoring import record_tool_call
+from tools.monitoring import record_tool_call, record_token_usage
 from tools.config import MODEL_AGENT
 from tools.calc import (
     calculate_dcf, calculate_peg, calculate_pe_vs_sector,
@@ -79,6 +79,8 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
         parallel_tool_calls=True,
         temperature=OPT["temperature"],
     )
+    if response.usage:
+        record_token_usage("CalcAgent", response.usage.prompt_tokens, response.usage.completion_tokens)
     msg = response.choices[0].message
 
     while msg.tool_calls:
@@ -100,6 +102,8 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
             fn = TOOL_FUNCTIONS.get(name)
             _t = time.perf_counter()
             result = fn(**args) if fn else f"Unknown tool: {name}"
+            if isinstance(result, str) and len(result) > 3000:
+                result = result[:3000] + "\n... [truncated]"
             _dur = round((time.perf_counter() - _t) * 1000)
             _err = result[:120] if isinstance(result, str) and result.startswith("TOOL_ERROR") else None
             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
@@ -112,6 +116,8 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
             parallel_tool_calls=True,
             temperature=OPT["temperature"],
         )
+        if response.usage:
+            record_token_usage("CalcAgent", response.usage.prompt_tokens, response.usage.completion_tokens)
         msg = response.choices[0].message
 
     return msg.content or ""
