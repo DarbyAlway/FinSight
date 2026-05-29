@@ -869,3 +869,32 @@ def test_web_search_with_sources_returns_empty_on_exception():
 
     assert snippets == ""
     assert urls == []
+
+
+# ---------------------------------------------------------------------------
+# tools/llm tests
+# ---------------------------------------------------------------------------
+
+def test_llm_chat_raises_when_no_api_key():
+    import tools.llm as llm_module
+    from unittest.mock import patch
+    import pytest
+    llm_module._client = None
+    with patch("tools.llm.os.getenv", return_value=None):
+        with pytest.raises(RuntimeError, match="LLM_API_KEY not set"):
+            llm_module._get_client()
+    llm_module._client = None
+
+
+def test_llm_chat_returns_string():
+    import tools.llm as llm_module
+    from unittest.mock import MagicMock, patch
+    llm_module._client = None
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = "mocked answer"
+    with patch("tools.llm.os.getenv", return_value="fake-key"), \
+         patch("tools.llm.OpenAI") as mock_openai_cls:
+        mock_openai_cls.return_value.chat.completions.create.return_value = mock_response
+        result = llm_module.llm_chat("test-model", [{"role": "user", "content": "hi"}])
+    assert result == "mocked answer"
+    llm_module._client = None
