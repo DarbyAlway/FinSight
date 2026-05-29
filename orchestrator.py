@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 
 import ollama
@@ -137,21 +138,37 @@ def process_turn(
         "ratios": run_ratios,
     }
 
-    for agent_name in agents_to_run:
+    ticker_hint = f"[Use exactly these tickers: {', '.join(tickers)}]\n" if tickers else ""
+    agent_input = ticker_hint + user_input
+
+    def _run_agent(agent_name: str):
         fn = agent_map.get(agent_name)
         if fn is None:
             logging.warning("[Orchestrator] unknown agent '%s' — skipping", agent_name)
-            continue
+            return agent_name, None
         try:
             logging.info("[Orchestrator] → calling agent: %s", agent_name)
             t1 = time.time()
-            ticker_hint = f"[Use exactly these tickers: {', '.join(tickers)}]\n" if tickers else ""
-            result = fn(ticker_hint + user_input, accumulated_context, history=messages)
-            accumulated_context += f"\n\n[{agent_name.upper()} AGENT]\n{result}"
+            result = fn(agent_input, "", history=messages)
             logging.info("[Orchestrator] ✓ agent %s done (%.2fs)", agent_name, time.time() - t1)
+            return agent_name, result
         except Exception as e:
             logging.warning("[Orchestrator] %s agent failed — %s", agent_name, e)
             _log_agent_error(agent_name, e)
+            return agent_name, None
+
+    with ThreadPoolExecutor() as executor:
+        futures = {executor.submit(_run_agent, name): name for name in agents_to_run}
+        agent_results = {}
+        for future in as_completed(futures):
+            name, result = future.result()
+            if result is not None:
+                agent_results[name] = result
+
+    # Preserve plan order in accumulated context
+    for name in agents_to_run:
+        if name in agent_results:
+            accumulated_context += f"\n\n[{name.upper()} AGENT]\n{agent_results[name]}"
 
     synthesis_system = synth_sys
     synthesis_messages = [{"role": "system", "content": synthesis_system}, *messages]

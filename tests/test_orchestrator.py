@@ -69,21 +69,24 @@ def test_single_agent_plan_calls_correct_agent():
     assert "400" in result or "revenue" in result.lower()
 
 
-def test_multi_agent_passes_context_forward():
+def test_multi_agent_both_called_in_parallel():
     from orchestrator import process_turn
 
     plan_json = json.dumps({"agents": ["financials", "calc"], "tickers": ["AAPL"]})
-    fin_result = "AAPL operating income: $120B"
 
     with patch("orchestrator.llm_chat", side_effect=[plan_json, "AAPL DCF: $195/share"]), \
-         patch("orchestrator.run_financials", return_value=fin_result), \
+         patch("orchestrator.run_financials", return_value="AAPL operating income: $120B") as mock_fin, \
          patch("orchestrator.run_calc", return_value="DCF: $195/share") as mock_calc:
 
-        process_turn("Calculate AAPL DCF", [])
+        result, _ = process_turn("Calculate AAPL DCF", [])
 
-    calc_call_args = mock_calc.call_args
-    context_passed = calc_call_args[0][1] if calc_call_args[0] else calc_call_args[1].get("context", "")
-    assert "operating income" in context_passed or "AAPL" in context_passed
+    mock_fin.assert_called_once()
+    mock_calc.assert_called_once()
+    # agents run in parallel — each receives empty accumulated context
+    fin_context = mock_fin.call_args[0][1] if mock_fin.call_args[0] else mock_fin.call_args[1].get("context", "")
+    calc_context = mock_calc.call_args[0][1] if mock_calc.call_args[0] else mock_calc.call_args[1].get("context", "")
+    assert fin_context == ""
+    assert calc_context == ""
 
 
 def test_malformed_plan_uses_keyword_fallback():
