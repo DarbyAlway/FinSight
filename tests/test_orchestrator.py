@@ -127,14 +127,15 @@ def test_agent_failure_is_skipped_gracefully():
 def test_tavily_fallback_triggered_when_uncertain():
     from orchestrator import process_turn
 
+    plan_json = json.dumps({"agents": ["financials"], "tickers": ["AAPL"]})
     uncertain_answer = "I don't have sufficient data to answer this."
     enriched_answer = "Based on web results, AAPL revenue was $94B."
 
-    with patch("orchestrator._is_conversational", return_value=True), \
+    with patch("orchestrator.llm_chat", side_effect=[plan_json, uncertain_answer, enriched_answer]), \
          patch("orchestrator.is_uncertain", return_value=True), \
          patch("orchestrator._web_search_with_sources",
                return_value=("Apple revenue was $94B per Reuters.", ["https://reuters.com/aapl"])), \
-         patch("orchestrator.llm_chat", side_effect=[uncertain_answer, enriched_answer]):
+         patch("orchestrator.run_financials", return_value="Revenue: $391B"):
         result, _ = process_turn("What is AAPL revenue?", [])
 
     assert "https://reuters.com/aapl" in result
