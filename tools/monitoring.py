@@ -21,7 +21,6 @@ def record_agent_call(agent_name: str, duration_ms: int | None = None):
     with _lock:
         _agent_counts[agent_name] += 1
         count = _agent_counts[agent_name]
-    logging.info("[Monitor] agent=%s total_calls=%d duration_ms=%s", agent_name, count, duration_ms)
     _append({"event": "agent_call", "agent": agent_name, "total_calls": count, "duration_ms": duration_ms})
 
 
@@ -34,10 +33,6 @@ def record_tool_call(agent_name: str, tool_name: str, args: dict,
         count = _tool_counts[key]
         if error:
             _error_counts[key] += 1
-    logging.info(
-        "[Monitor] agent=%s tool=%s duration_ms=%s cache_hit=%s error=%s total_calls=%d",
-        agent_name, tool_name, duration_ms, cache_hit, error, count,
-    )
     _append({
         "event": "tool_call",
         "agent": agent_name,
@@ -51,7 +46,6 @@ def record_tool_call(agent_name: str, tool_name: str, args: dict,
 
 
 def record_turn(agents_called: list[str], duration_ms: int):
-    logging.info("[Monitor] turn complete agents=%s duration_ms=%d", agents_called, duration_ms)
     _append({"event": "turn", "agents": agents_called, "duration_ms": duration_ms})
 
 
