@@ -1,9 +1,8 @@
 import json
 import logging
 
-import ollama
-
-from tools.config import MODEL
+from tools.llm import _get_client
+from tools.config import MODEL_AGENT
 from tools.news import get_stock_news, search_news
 from prompts import NEWS_SYSTEM as SYSTEM_PROMPT
 
@@ -61,23 +60,43 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
         ]
     messages.append({"role": "user", "content": user_question})
 
-    response = ollama.chat(model=MODEL, messages=messages, tools=TOOLS, options=OPT)
-    msg = response.message
+    client = _get_client()
+    response = client.chat.completions.create(
+        model=MODEL_AGENT,
+        messages=messages,
+        tools=TOOLS,
+        parallel_tool_calls=True,
+        temperature=OPT["temperature"],
+    )
+    msg = response.choices[0].message
 
     while msg.tool_calls:
-        messages.append(msg)
+        messages.append({
+            "role": "assistant",
+            "content": msg.content or "",
+            "tool_calls": [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                }
+                for tc in msg.tool_calls
+            ],
+        })
         for tool_call in msg.tool_calls:
             name = tool_call.function.name
-            args = (
-                tool_call.function.arguments
-                if isinstance(tool_call.function.arguments, dict)
-                else json.loads(tool_call.function.arguments)
-            )
+            args = json.loads(tool_call.function.arguments)
             fn = TOOL_FUNCTIONS.get(name)
             result = fn(**args) if fn else f"Unknown tool: {name}"
-            messages.append({"role": "tool", "content": result})
+            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
             logging.info("[NewsAgent] %s(%s)", name, args)
-        response = ollama.chat(model=MODEL, messages=messages, tools=TOOLS, options=OPT)
-        msg = response.message
+        response = client.chat.completions.create(
+            model=MODEL_AGENT,
+            messages=messages,
+            tools=TOOLS,
+            parallel_tool_calls=True,
+            temperature=OPT["temperature"],
+        )
+        msg = response.choices[0].message
 
     return msg.content or ""
