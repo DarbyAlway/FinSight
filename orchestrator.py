@@ -57,6 +57,8 @@ _FINANCIAL_KEYWORDS = {
     "cash flow", "operating cash", "capex", "interest coverage",
     "current ratio", "price target", "target price",
     "guidance", "outlook", "forecast", "beat", "miss", "report", "trend",
+    # Thai financial keywords
+    "รายได้", "กำไร", "หุ้น", "งบการเงิน", "ราคา", "ปันผล", "ข่าว", "นักวิเคราะห์", "ตลาด",
 }
 
 import re as _re

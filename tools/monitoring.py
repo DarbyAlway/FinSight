@@ -25,20 +25,21 @@ def _now_ts() -> str:
 
 
 def _append_to(filename: str, entry: dict):
-    """Read existing JSON array, append entry, write back."""
+    """Read existing JSON array, append entry, write back — serialized via lock."""
     path = os.path.join(_LOG_DIR, filename)
-    try:
-        os.makedirs(_LOG_DIR, exist_ok=True)
-        if os.path.exists(path):
-            with open(path, "r") as f:
-                data = json.load(f)
-        else:
-            data = []
-        data.append(entry)
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
-    except OSError:
-        pass
+    with _lock:
+        try:
+            os.makedirs(_LOG_DIR, exist_ok=True)
+            if os.path.exists(path):
+                with open(path, "r") as f:
+                    data = json.load(f)
+            else:
+                data = []
+            data.append(entry)
+            with open(path, "w") as f:
+                json.dump(data, f, indent=2)
+        except (OSError, json.JSONDecodeError):
+            pass
 
 
 def record_agent_call(agent_name: str, duration_ms: int | None = None):

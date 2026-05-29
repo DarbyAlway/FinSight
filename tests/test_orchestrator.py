@@ -39,6 +39,7 @@ def test_direct_answer_skips_agents():
     synthesis_text = "P/E ratio is a valuation metric."
 
     with patch("orchestrator.llm_chat", side_effect=[plan_json, synthesis_text]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator.run_financials") as mock_fin, \
          patch("orchestrator.run_news") as mock_news, \
          patch("orchestrator.run_calc") as mock_calc:
@@ -57,6 +58,7 @@ def test_single_agent_plan_calls_correct_agent():
     plan_json = json.dumps({"agents": ["financials"], "tickers": ["AAPL"]})
 
     with patch("orchestrator.llm_chat", side_effect=[plan_json, "AAPL revenue is $400B."]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator.run_financials", return_value="Revenue: $400B") as mock_fin, \
          patch("orchestrator.run_news") as mock_news, \
          patch("orchestrator.run_calc") as mock_calc:
@@ -75,6 +77,7 @@ def test_multi_agent_both_called_in_parallel():
     plan_json = json.dumps({"agents": ["financials", "calc"], "tickers": ["AAPL"]})
 
     with patch("orchestrator.llm_chat", side_effect=[plan_json, "AAPL DCF: $195/share"]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator.run_financials", return_value="AAPL operating income: $120B") as mock_fin, \
          patch("orchestrator.run_calc", return_value="DCF: $195/share") as mock_calc:
 
@@ -82,7 +85,6 @@ def test_multi_agent_both_called_in_parallel():
 
     mock_fin.assert_called_once()
     mock_calc.assert_called_once()
-    # agents run in parallel — each receives empty accumulated context
     fin_context = mock_fin.call_args[0][1] if mock_fin.call_args[0] else mock_fin.call_args[1].get("context", "")
     calc_context = mock_calc.call_args[0][1] if mock_calc.call_args[0] else mock_calc.call_args[1].get("context", "")
     assert fin_context == ""
@@ -96,6 +98,7 @@ def test_malformed_plan_uses_keyword_fallback():
         "I cannot produce a plan right now.",
         "Here are the latest AAPL headlines.",
     ]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator.run_financials") as mock_fin, \
          patch("orchestrator.run_news", return_value="Headline: Apple up 2%") as mock_news, \
          patch("orchestrator.run_calc") as mock_calc:
@@ -112,6 +115,7 @@ def test_agent_failure_is_skipped_gracefully():
     plan_json = json.dumps({"agents": ["financials", "news"], "tickers": ["AAPL"]})
 
     with patch("orchestrator.llm_chat", side_effect=[plan_json, "Here is what I found."]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator.run_financials", side_effect=Exception("timeout")), \
          patch("orchestrator.run_news", return_value="Apple up 2%"):
 

@@ -9,7 +9,7 @@ from tools.config import (
     DENSE_MODEL, SPARSE_MODEL,
 )
 
-# bge-large produces 1024-dim vectors
+# multilingual-e5-large produces 1024-dim vectors (supports Thai↔English cross-lingual search)
 DENSE_DIM = 1024
 
 _dense_encoder = None

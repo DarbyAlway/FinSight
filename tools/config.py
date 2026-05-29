@@ -1,7 +1,7 @@
 DB_PATH = "cache.db"
 CACHE_TTL_DAYS = 90
 QDRANT_COLLECTION = "stock_news"
-DENSE_MODEL = "BAAI/bge-large-en-v1.5"
+DENSE_MODEL = "intfloat/multilingual-e5-large"
 SPARSE_MODEL = "Qdrant/bm25"
 COMPANY_PROFILES_COLLECTION = "company_profiles"
 TICKER_INFO_TTL_HOURS = 24
