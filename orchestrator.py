@@ -25,7 +25,7 @@ def _log_agent_error(agent_name: str, error: Exception):
 
 from tools.config import MODEL, MODEL_PLAN, MODEL_SYNTHESIS
 from tools.llm import llm_chat
-from tools.monitoring import record_agent_call
+from tools.monitoring import record_agent_call, record_turn
 from agents.financials import run as run_financials
 from agents.news import run as run_news
 from agents.calc import run as run_calc
@@ -149,9 +149,10 @@ def process_turn(
             return agent_name, None
         try:
             logging.info("[Orchestrator] → calling agent: %s", agent_name)
-            record_agent_call(agent_name)
             t1 = time.time()
             result = fn(agent_input, "", history=messages)
+            agent_dur = round((time.time() - t1) * 1000)
+            record_agent_call(agent_name, duration_ms=agent_dur)
             logging.info("[Orchestrator] ✓ agent %s done (%.2fs)", agent_name, time.time() - t1)
             return agent_name, result
         except Exception as e:
@@ -200,6 +201,7 @@ def process_turn(
             logging.info("[Orchestrator] Tavily fallback used (%d sources)", len(urls))
     logging.info("[timing] synthesis call: %.2fs", time.time() - t2)
     logging.info("[timing] total turn: %.2fs", time.time() - t0)
+    record_turn(agents_to_run, duration_ms=round((time.time() - t0) * 1000))
 
     updated_messages = messages + [
         {"role": "user", "content": user_input},

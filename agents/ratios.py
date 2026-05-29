@@ -1,4 +1,5 @@
 import json
+import time
 import logging
 
 from tools.llm import _get_client
@@ -155,10 +156,13 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
             name = tool_call.function.name
             args = json.loads(tool_call.function.arguments)
             fn = TOOL_FUNCTIONS.get(name)
+            _t = time.perf_counter()
             result = fn(**args) if fn else f"Unknown tool: {name}"
+            _dur = round((time.perf_counter() - _t) * 1000)
+            _err = result[:120] if isinstance(result, str) and result.startswith("TOOL_ERROR") else None
             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
             logging.info("[RatiosAgent] %s(%s)", name, args)
-            record_tool_call("RatiosAgent", name, args)
+            record_tool_call("RatiosAgent", name, args, duration_ms=_dur, error=_err)
         response = client.chat.completions.create(
             model=MODEL_AGENT,
             messages=messages,
