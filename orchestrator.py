@@ -111,6 +111,7 @@ def process_turn(
         {"role": "user", "content": user_input},
     ]
     t0 = time.time()
+    tickers: list[str] = []
     if _is_conversational(user_input):
         agents_to_run = []
         logging.info("[Orchestrator] conversational — no agents called")
@@ -144,7 +145,8 @@ def process_turn(
         try:
             logging.info("[Orchestrator] → calling agent: %s", agent_name)
             t1 = time.time()
-            result = fn(user_input, accumulated_context, history=messages)
+            ticker_hint = f"[Use exactly these tickers: {', '.join(tickers)}]\n" if tickers else ""
+            result = fn(ticker_hint + user_input, accumulated_context, history=messages)
             accumulated_context += f"\n\n[{agent_name.upper()} AGENT]\n{result}"
             logging.info("[Orchestrator] ✓ agent %s done (%.2fs)", agent_name, time.time() - t1)
         except Exception as e:
