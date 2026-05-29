@@ -46,6 +46,18 @@ logging.basicConfig(
 )
 
 
+def _init_phoenix():
+    try:
+        import phoenix as px
+        from openinference.instrumentation.openai import OpenAIInstrumentor
+        session = px.launch_app()
+        OpenAIInstrumentor().instrument()
+        logging.info("Phoenix tracing enabled: %s", session.url)
+    except ImportError:
+        pass
+    except Exception as e:
+        logging.warning("Phoenix init failed — tracing disabled: %s", e)
+
 
 def _build_persona_system(persona_key: str | None) -> str | None:
     if persona_key == "panel":
@@ -91,4 +103,5 @@ if __name__ == "__main__":
     init_db()
     init_qdrant()
     _get_anchor_vecs()
+    _init_phoenix()
     chat()
