@@ -2,6 +2,7 @@ import json
 import logging
 
 from tools.llm import _get_client
+from tools.monitoring import record_tool_call
 from tools.config import MODEL_AGENT
 from tools.calc import (
     calculate_dcf, calculate_peg, calculate_pe_vs_sector,
@@ -99,6 +100,7 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
             result = fn(**args) if fn else f"Unknown tool: {name}"
             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
             logging.info("[CalcAgent] %s(%s)", name, args)
+            record_tool_call("CalcAgent", name, args)
         response = client.chat.completions.create(
             model=MODEL_AGENT,
             messages=messages,

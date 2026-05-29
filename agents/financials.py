@@ -2,6 +2,7 @@ import json
 import logging
 
 from tools.llm import _get_client
+from tools.monitoring import record_tool_call
 from tools.config import MODEL_AGENT
 from tools.income import get_income_statement, get_quarterly_statement
 from tools.company import get_company_info
@@ -134,6 +135,7 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
             result = fn(**args) if fn else f"Unknown tool: {name}"
             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
             logging.info("[FinancialsAgent] %s(%s)", name, args)
+            record_tool_call("FinancialsAgent", name, args)
         response = client.chat.completions.create(
             model=MODEL_AGENT,
             messages=messages,
