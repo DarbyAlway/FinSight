@@ -7,3 +7,4 @@ duckdb
 qdrant-client[fastembed]
 pandas
 numpy
+openai>=1.0

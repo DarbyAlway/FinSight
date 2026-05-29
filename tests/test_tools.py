@@ -875,7 +875,7 @@ def test_web_search_with_sources_returns_empty_on_exception():
 # tools/llm tests
 # ---------------------------------------------------------------------------
 
-def test_llm_chat_raises_when_no_api_key():
+def test_get_client_raises_when_no_api_key():
     import tools.llm as llm_module
     from unittest.mock import patch
     import pytest
