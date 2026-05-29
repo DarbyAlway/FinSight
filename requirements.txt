@@ -5,3 +5,5 @@ ollama
 matplotlib
 duckdb
 qdrant-client[fastembed]
+pandas
+numpy

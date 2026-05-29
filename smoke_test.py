@@ -1,9 +1,9 @@
 import sys
 sys.path.insert(0, ".")
 from main import (
-    get_income_statement, get_stock_news, search_news,
-    get_company_info, compare_tickers, TOOLS, TOOL_FUNCTIONS, dispatch_tool
+    get_income_statement, get_stock_news, search_news, get_company_info,
 )
+from orchestrator import process_turn
 
 results = {}
 
@@ -35,13 +35,16 @@ results["search"] = len(r) > 0
 print(r[:300])
 print("PASS" if results["search"] else "FAIL")
 
-# Check TOOLS and TOOL_FUNCTIONS wired correctly
-print("\n--- Tool schemas ---")
-tool_names = [t["function"]["name"] for t in TOOLS]
-expected = {"get_income_statement", "get_stock_news", "search_news", "compare_tickers", "get_company_info"}
-results["schemas"] = expected == set(tool_names) == set(TOOL_FUNCTIONS.keys())
-print(f"Tools: {tool_names}")
-print("PASS" if results["schemas"] else "FAIL")
+# Tool 5: orchestrator end-to-end (direct-answer path, no network needed)
+print("\n--- process_turn (orchestrator wiring) ---")
+try:
+    answer, msgs = process_turn("What is the stock market?", [])
+    results["orchestrator"] = isinstance(answer, str) and len(answer) > 0 and isinstance(msgs, list)
+    print(answer[:200])
+    print("PASS" if results["orchestrator"] else "FAIL")
+except Exception as e:
+    results["orchestrator"] = False
+    print(f"FAIL: {e}")
 
 # Summary
 print("\n=== SMOKE TEST SUMMARY ===")

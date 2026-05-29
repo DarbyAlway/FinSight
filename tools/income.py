@@ -1,12 +1,22 @@
+import logging
 import re
 import time
 
-import duckdb
-import matplotlib.pyplot as plt
 from edgar import Company
 
-from tools.config import DB_PATH
-from tools.db import is_cache_fresh, load_from_cache, save_to_cache, fuzzy_query
+from tools.db import (
+    is_cache_fresh, load_from_cache, save_to_cache,
+    is_quarterly_cache_fresh, save_quarterly_cache, load_quarterly_cache,
+)
+
+
+def _unit_multiplier(raw: str) -> float:
+    lower = raw.lower()
+    if 'in thousands' in lower:
+        return 0.001
+    if 'in billions' in lower:
+        return 1000.0
+    return 1.0  # default: already in millions
 
 
 def parse_income_statement(ticker: str, raw: str) -> list[dict]:
@@ -27,6 +37,7 @@ def parse_income_statement(ticker: str, raw: str) -> list[dict]:
 
     # edgar Company.get_financials().income_statement() returns plain indented text with $ values
     dollar_re = re.compile(r'\$(\([\d,]+\)|[\d,]+)')
+    multiplier = _unit_multiplier(raw)
     current_section = "General"
 
     for line in raw.split('\n'):
@@ -46,9 +57,9 @@ def parse_income_statement(ticker: str, raw: str) -> list[dict]:
         values = []
         for m in matches:
             if m.startswith('('):
-                values.append(-float(m.strip('()').replace(',', '')))
+                values.append(-float(m.strip('()').replace(',', '')) * multiplier)
             else:
-                values.append(float(m.replace(',', '')))
+                values.append(float(m.replace(',', '')) * multiplier)
 
         if len(values) != len(fiscal_years):
             continue
@@ -69,9 +80,121 @@ def parse_income_statement(ticker: str, raw: str) -> list[dict]:
     return rows
 
 
+def parse_quarterly_statement(ticker: str, raw: str, period_end: str) -> list[dict]:
+    """Parse a 10-Q income statement, extracting only 'Three Months Ended' columns."""
+    rows = []
+    now = time.time()
+    date_re = re.compile(r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+,\s+\d{4})')
+    dollar_re = re.compile(r'\$(\([\d,]+\)|[\d,]+)')
+    lines = raw.split('\n')
+
+    quarterly_dates = []
+    ytd_count = 0
+    pending_period = None
+
+    for line in lines:
+        lower = line.lower()
+        if 'three months' in lower:
+            pending_period = 'quarterly'
+        elif 'six months' in lower or 'nine months' in lower:
+            pending_period = 'ytd'
+
+        dates = date_re.findall(line)
+        if not dates:
+            continue
+
+        if pending_period == 'quarterly' and not quarterly_dates:
+            quarterly_dates = dates
+            pending_period = None
+        elif pending_period == 'ytd' and ytd_count == 0:
+            ytd_count = len(dates)
+            pending_period = None
+
+    # Fallback: no explicit period header — take dates from the densest header line
+    if not quarterly_dates:
+        best = []
+        for line in lines:
+            found = date_re.findall(line)
+            if len(found) > len(best):
+                best = found
+        quarterly_dates = best
+
+    if not quarterly_dates:
+        return rows
+
+    total_cols = len(quarterly_dates) + ytd_count
+    multiplier = _unit_multiplier(raw)
+    current_section = "General"
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or re.match(r'^[─━+=\-\s]+$', stripped):
+            continue
+        if stripped.endswith(':') and not dollar_re.search(line):
+            current_section = stripped.rstrip(':').strip()
+            continue
+        matches = dollar_re.findall(line)
+        if not matches:
+            continue
+
+        values = []
+        for m in matches:
+            if m.startswith('('):
+                values.append(-float(m.strip('()').replace(',', '')) * multiplier)
+            else:
+                values.append(float(m.replace(',', '')) * multiplier)
+
+        if len(values) not in (len(quarterly_dates), total_cols):
+            continue
+
+        label_part = line[:line.index('$')].strip()
+        if not label_part:
+            continue
+        name = label_part.rstrip(':').strip()
+
+        for i, date in enumerate(quarterly_dates):
+            rows.append({
+                "ticker": ticker, "period_end": date,
+                "section": current_section, "line_item": name,
+                "value": values[i], "fetched_at": now,
+            })
+
+    return rows
+
+
+def get_quarterly_statement(ticker: str) -> str:
+    try:
+        if is_quarterly_cache_fresh(ticker):
+            logging.info("quarterly cache hit: %s", ticker)
+            return load_quarterly_cache(ticker)
+        company = Company(ticker)
+        filings = company.get_filings(form="10-Q")
+        if not filings:
+            return f"No 10-Q filings found for {ticker}."
+        rows = []
+        for filing in list(filings)[:4]:
+            try:
+                tenq = filing.obj()
+                raw = str(tenq.financials.income_statement())
+                period_end = str(filing.period_of_report)
+                rows.extend(parse_quarterly_statement(ticker, raw, period_end))
+            except Exception as e:
+                logging.warning("10-Q parse failed for %s (%s): %s", ticker, filing.period_of_report, e)
+        if rows:
+            save_quarterly_cache(rows)
+            return load_quarterly_cache(ticker)
+        return f"TOOL_ERROR: No quarterly data could be parsed for {ticker}. Do not use training data to answer — tell the user the data is unavailable."
+    except Exception as e:
+        stale = load_quarterly_cache(ticker)
+        if stale:
+            return f"[Stale cache] {stale}\n(Refresh failed: {e})"
+        return f"TOOL_ERROR: Failed to fetch quarterly statement for {ticker}: {e}. Do not use training data to answer — tell the user the data is unavailable."
+
+
 def get_income_statement(ticker: str) -> str:
     try:
         if is_cache_fresh(ticker):
+            logging.info("cache hit: %s", ticker)
             return load_from_cache(ticker)
         company = Company(ticker)
         financials = company.get_financials()
@@ -88,62 +211,3 @@ def get_income_statement(ticker: str) -> str:
         return f"Error fetching income statement for {ticker}: {e}"
 
 
-def compare_tickers(tickers: list[str], line_item: str) -> str:
-    if not tickers:
-        return "No tickers provided."
-    fetch_errors = []
-    for ticker in tickers:
-        if not is_cache_fresh(ticker):
-            result = get_income_statement(ticker)
-            if result.startswith("Error"):
-                fetch_errors.append(f"{ticker}: {result}")
-
-    results = {t: fuzzy_query(t, line_item) for t in tickers}
-    all_years = sorted(
-        {r["fiscal_year"] for rows in results.values() for r in rows},
-        key=lambda y: time.strptime(y, "%b %d, %Y"),
-        reverse=True
-    )
-
-    if not all_years:
-        lines = [f"No match found for '{line_item}'. Available line items:"]
-        for ticker in tickers:
-            with duckdb.connect(DB_PATH) as con:
-                items = [i[0] for i in con.execute(
-                    "SELECT DISTINCT line_item FROM income_statements WHERE ticker = ?",
-                    (ticker,)
-                ).fetchall()]
-            lines.append(f"  {ticker}: {', '.join(items[:10])}")
-        return "\n".join(lines)
-
-    x = range(len(all_years))
-    width = 0.8 / len(tickers)
-    fig, ax = plt.subplots(figsize=(10, 6))
-    for i, ticker in enumerate(tickers):
-        row_by_year = {r["fiscal_year"]: r["value"] for r in results.get(ticker, [])}
-        vals = [row_by_year.get(y, 0) for y in all_years]
-        offset = (i - len(tickers) / 2 + 0.5) * width
-        ax.bar([xi + offset for xi in x], vals, width, label=ticker)
-
-    matched_label = results[tickers[0]][0]["line_item"] if results.get(tickers[0]) else line_item
-    ax.set_title(f"{matched_label}: {' vs '.join(tickers)}")
-    ax.set_xlabel("Fiscal Year")
-    ax.set_ylabel("Value (millions)")
-    ax.set_xticks(list(x))
-    ax.set_xticklabels(all_years)
-    ax.legend()
-    plt.tight_layout()
-    plt.show()
-
-    summary = [f"Comparison: '{line_item}' — {', '.join(tickers)}\n"]
-    for ticker in tickers:
-        rows = results.get(ticker, [])
-        if rows:
-            vals_str = ", ".join(f"{r['fiscal_year']}: ${r['value']:,.0f}M" for r in rows)
-            summary.append(f"  {ticker} (matched '{rows[0]['line_item']}'): {vals_str}")
-        else:
-            summary.append(f"  {ticker}: no match found")
-    summary.append("Chart displayed.")
-    if fetch_errors:
-        summary.append("Fetch warnings: " + "; ".join(fetch_errors))
-    return "\n".join(summary)

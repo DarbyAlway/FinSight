@@ -1,10 +1,14 @@
 import hashlib
 import json
 import time
+from datetime import datetime
 
 import duckdb
 
 from tools.config import DB_PATH, CACHE_TTL_DAYS, TICKER_INFO_TTL_HOURS, SYNONYMS
+
+QUARTERLY_TTL_DAYS = 7
+EARNINGS_TTL_DAYS = 7
 
 
 def init_db():
@@ -21,6 +25,17 @@ def init_db():
             )
         """)
         con.execute("""
+            CREATE TABLE IF NOT EXISTS quarterly_statements (
+                ticker        VARCHAR,
+                period_end    VARCHAR,
+                section       VARCHAR,
+                line_item     VARCHAR,
+                value         DOUBLE,
+                fetched_at    DOUBLE,
+                PRIMARY KEY (ticker, period_end, section, line_item)
+            )
+        """)
+        con.execute("""
             CREATE TABLE IF NOT EXISTS ticker_info (
                 symbol          VARCHAR PRIMARY KEY,
                 sector          VARCHAR,
@@ -29,6 +44,51 @@ def init_db():
                 summary_hash    VARCHAR,
                 info_json       VARCHAR,
                 cached_at       DOUBLE
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS price_history (
+                ticker     VARCHAR,
+                date       VARCHAR,
+                close      DOUBLE,
+                fetched_at DOUBLE,
+                PRIMARY KEY (ticker, date)
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS balance_sheets (
+                ticker      VARCHAR,
+                fiscal_year VARCHAR,
+                section     VARCHAR,
+                line_item   VARCHAR,
+                value       DOUBLE,
+                fetched_at  DOUBLE,
+                PRIMARY KEY (ticker, fiscal_year, section, line_item)
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS cash_flows (
+                ticker      VARCHAR,
+                fiscal_year VARCHAR,
+                section     VARCHAR,
+                line_item   VARCHAR,
+                value       DOUBLE,
+                fetched_at  DOUBLE,
+                PRIMARY KEY (ticker, fiscal_year, section, line_item)
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS earnings_releases (
+                ticker            VARCHAR,
+                period_end        VARCHAR,
+                eps_actual        DOUBLE,
+                eps_estimate      DOUBLE,
+                revenue_actual    DOUBLE,
+                revenue_estimate  DOUBLE,
+                beat_miss         VARCHAR,
+                guidance_text     VARCHAR,
+                fetched_at        DOUBLE,
+                PRIMARY KEY (ticker, period_end)
             )
         """)
 
@@ -142,3 +202,217 @@ def get_summary_hash(symbol: str) -> str | None:
             "SELECT summary_hash FROM ticker_info WHERE symbol = ?", (symbol,)
         ).fetchone()
     return row[0] if row else None
+
+
+def is_quarterly_cache_fresh(ticker: str) -> bool:
+    with duckdb.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT fetched_at FROM quarterly_statements WHERE ticker = ? ORDER BY fetched_at DESC LIMIT 1",
+            (ticker,)
+        ).fetchone()
+    if row is None:
+        return False
+    return (time.time() - row[0]) / 86400 < QUARTERLY_TTL_DAYS
+
+
+def save_quarterly_cache(rows: list[dict]):
+    if not rows:
+        return
+    with duckdb.connect(DB_PATH) as con:
+        con.executemany(
+            """INSERT OR REPLACE INTO quarterly_statements
+               (ticker, period_end, section, line_item, value, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            [(r["ticker"], r["period_end"], r["section"],
+              r["line_item"], r["value"], r["fetched_at"]) for r in rows],
+        )
+
+
+def load_quarterly_cache(ticker: str) -> str:
+    with duckdb.connect(DB_PATH) as con:
+        rows = con.execute(
+            "SELECT period_end, section, line_item, value FROM quarterly_statements "
+            "WHERE ticker = ? ORDER BY period_end DESC, section, line_item",
+            (ticker,)
+        ).fetchall()
+    if not rows:
+        return ""
+    lines = [f"{ticker} Quarterly Income Statement (cached)"]
+    current_period = None
+    current_section = None
+    for period_end, section, line_item, value in rows:
+        if period_end != current_period:
+            lines.append(f"\n  Period ending: {period_end}")
+            current_period = period_end
+            current_section = None
+        if section != current_section:
+            lines.append(f"    {section}")
+            current_section = section
+        lines.append(f"      {line_item}: ${value:,.1f}M")
+    return "\n".join(lines)
+
+
+def is_balance_sheet_fresh(ticker: str) -> bool:
+    with duckdb.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT fetched_at FROM balance_sheets WHERE ticker = ? LIMIT 1",
+            (ticker,)
+        ).fetchone()
+    if row is None:
+        return False
+    return (time.time() - row[0]) / 86400 < CACHE_TTL_DAYS
+
+
+def save_balance_sheet(rows: list[dict]):
+    if not rows:
+        return
+    with duckdb.connect(DB_PATH) as con:
+        con.executemany(
+            """INSERT OR REPLACE INTO balance_sheets
+               (ticker, fiscal_year, section, line_item, value, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            [(r["ticker"], r["fiscal_year"], r["section"],
+              r["line_item"], r["value"], r["fetched_at"]) for r in rows],
+        )
+
+
+def load_balance_sheet(ticker: str) -> str:
+    with duckdb.connect(DB_PATH) as con:
+        rows = con.execute(
+            "SELECT fiscal_year, section, line_item, value FROM balance_sheets "
+            "WHERE ticker = ? ORDER BY fiscal_year DESC, section, line_item",
+            (ticker,)
+        ).fetchall()
+    if not rows:
+        return ""
+    lines = [f"{ticker} Balance Sheet (SEC 10-K, cached)"]
+    current_fy = None
+    current_section = None
+    for fiscal_year, section, line_item, value in rows:
+        if fiscal_year != current_fy:
+            lines.append(f"\n  {fiscal_year}")
+            current_fy = fiscal_year
+            current_section = None
+        if section != current_section:
+            lines.append(f"    {section}")
+            current_section = section
+        lines.append(f"      {line_item}: ${value:,.0f}M")
+    return "\n".join(lines)
+
+
+def is_cash_flow_fresh(ticker: str) -> bool:
+    with duckdb.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT fetched_at FROM cash_flows WHERE ticker = ? LIMIT 1",
+            (ticker,)
+        ).fetchone()
+    if row is None:
+        return False
+    return (time.time() - row[0]) / 86400 < CACHE_TTL_DAYS
+
+
+def save_cash_flow(rows: list[dict]):
+    if not rows:
+        return
+    with duckdb.connect(DB_PATH) as con:
+        con.executemany(
+            """INSERT OR REPLACE INTO cash_flows
+               (ticker, fiscal_year, section, line_item, value, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            [(r["ticker"], r["fiscal_year"], r["section"],
+              r["line_item"], r["value"], r["fetched_at"]) for r in rows],
+        )
+
+
+def load_cash_flow(ticker: str) -> str:
+    with duckdb.connect(DB_PATH) as con:
+        rows = con.execute(
+            """SELECT fiscal_year, section, line_item, value FROM cash_flows
+               WHERE ticker = ?
+               ORDER BY fiscal_year DESC,
+                        CASE section
+                            WHEN 'Operating Activities' THEN 1
+                            WHEN 'Investing Activities' THEN 2
+                            WHEN 'Financing Activities' THEN 3
+                            ELSE 4
+                        END,
+                        line_item""",
+            (ticker,)
+        ).fetchall()
+    if not rows:
+        return ""
+    lines = [f"{ticker} Cash Flow Statement (SEC 10-K, cached)"]
+    current_fy = None
+    current_section = None
+    for fiscal_year, section, line_item, value in rows:
+        if fiscal_year != current_fy:
+            lines.append(f"\n  {fiscal_year}")
+            current_fy = fiscal_year
+            current_section = None
+        if section != current_section:
+            lines.append(f"    {section}")
+            current_section = section
+        lines.append(f"      {line_item}: ${value:,.0f}M")
+    return "\n".join(lines)
+
+
+def is_earnings_fresh(ticker: str) -> bool:
+    with duckdb.connect(DB_PATH) as con:
+        row = con.execute(
+            "SELECT fetched_at FROM earnings_releases WHERE ticker = ? ORDER BY fetched_at DESC LIMIT 1",
+            (ticker,)
+        ).fetchone()
+    if row is None:
+        return False
+    return (time.time() - row[0]) / 86400 < EARNINGS_TTL_DAYS
+
+
+def save_earnings(rows: list[dict]):
+    if not rows:
+        return
+    with duckdb.connect(DB_PATH) as con:
+        con.executemany(
+            """INSERT OR REPLACE INTO earnings_releases
+               (ticker, period_end, eps_actual, eps_estimate, revenue_actual,
+                revenue_estimate, beat_miss, guidance_text, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [(r["ticker"], r["period_end"], r["eps_actual"], r["eps_estimate"],
+              r.get("revenue_actual"), r.get("revenue_estimate"),
+              r["beat_miss"], r.get("guidance_text"), r["fetched_at"]) for r in rows],
+        )
+
+
+def load_earnings(ticker: str) -> str:
+    with duckdb.connect(DB_PATH) as con:
+        rows = con.execute(
+            """SELECT period_end, eps_actual, eps_estimate, beat_miss,
+                      revenue_actual, guidance_text
+               FROM earnings_releases
+               WHERE ticker = ?
+               ORDER BY period_end DESC
+               LIMIT 4""",
+            (ticker,)
+        ).fetchall()
+    if not rows:
+        return ""
+    lines = [f"{ticker} Earnings (last {len(rows)} quarters)"]
+    for period_end, eps_actual, eps_estimate, beat_miss, revenue_actual, guidance_text in rows:
+        try:
+            dt = datetime.strptime(period_end, "%Y-%m-%d")
+            label = f"Q{(dt.month - 1) // 3 + 1} {dt.year} ({dt.strftime('%b %d, %Y')})"
+        except Exception:
+            label = period_end
+        pct = ""
+        if eps_estimate:
+            pct = f" ({(eps_actual - eps_estimate) / abs(eps_estimate) * 100:+.1f}%)"
+        lines.append(f"\n  {label}")
+        eps_str = f"${eps_actual:.2f}" if eps_actual is not None else "N/A"
+        est_str = f"${eps_estimate:.2f}" if eps_estimate is not None else "N/A"
+        lines.append(f"    EPS: {eps_str} actual | {est_str} estimate | {beat_miss.upper()}{pct}")
+        if revenue_actual:
+            lines.append(f"    Revenue: ${revenue_actual:,.0f}M actual")
+        if guidance_text:
+            lines.append(f"    Guidance: \"{guidance_text}\"")
+        else:
+            lines.append("    Guidance: (not available)")
+    return "\n".join(lines)
