@@ -190,7 +190,7 @@ def process_turn(
 
     t2 = time.time()
     answer = llm_chat(MODEL_SYNTHESIS, synthesis_messages, temperature=0.3)
-    if is_uncertain(answer):
+    if agents_to_run and is_uncertain(answer):
         snippets, urls = _web_search_with_sources(user_input)
         if snippets:
             web_messages = synthesis_messages + [{
