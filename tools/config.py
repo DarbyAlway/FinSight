@@ -16,7 +16,7 @@ SYNONYMS = {
     "eps":              ["%earnings per share%", "%diluted%"],
 }
 
-MODEL = "qwen3:14b"                         # agents — local Ollama (fallback)
-MODEL_AGENT = "qwen/qwen3-32b"              # agents — Groq
-MODEL_PLAN = "llama-3.3-70b-versatile"      # orchestrator planning — Groq
-MODEL_SYNTHESIS = "llama-3.3-70b-versatile" # synthesis — Groq
+MODEL = "qwen3:14b"          # agents — local Ollama
+MODEL_AGENT = "qwen3:14b"    # agents — local Ollama
+MODEL_PLAN = "qwen3:14b"     # orchestrator planning — local Ollama
+MODEL_SYNTHESIS = "qwen3:14b" # synthesis — local Ollama

@@ -6,6 +6,7 @@ from openai import OpenAI
 
 _GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 _CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
+_OLLAMA_BASE_URL = "http://localhost:11434/v1"
 _client: OpenAI | None = None
 _langfuse = None
 _langfuse_checked: bool = False
@@ -14,17 +15,20 @@ _langfuse_checked: bool = False
 def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        # Priority: LLM_API_KEY > GROQ_API_KEY > CEREBRAS_API_KEY
-        api_key = os.getenv("LLM_API_KEY") or os.getenv("GROQ_API_KEY") or os.getenv("CEREBRAS_API_KEY")
+        base_url = os.getenv("LLM_BASE_URL") or (
+            _CEREBRAS_BASE_URL if os.getenv("CEREBRAS_API_KEY") and not os.getenv("GROQ_API_KEY") and not os.getenv("LLM_API_KEY")
+            else _GROQ_BASE_URL if os.getenv("GROQ_API_KEY") or os.getenv("LLM_API_KEY")
+            else _OLLAMA_BASE_URL
+        )
+        # Pick the matching key based on the target provider
+        if "cerebras" in base_url:
+            api_key = os.getenv("LLM_API_KEY") or os.getenv("CEREBRAS_API_KEY")
+        elif "localhost" in base_url:
+            api_key = "not-needed"  # Ollama doesn't require an API key
+        else:
+            api_key = os.getenv("LLM_API_KEY") or os.getenv("GROQ_API_KEY")
         if not api_key:
             raise RuntimeError("LLM_API_KEY not set in environment")
-        # Auto-detect base URL: explicit LLM_BASE_URL wins; otherwise infer from which key is set
-        if os.getenv("LLM_BASE_URL"):
-            base_url = os.getenv("LLM_BASE_URL")
-        elif os.getenv("CEREBRAS_API_KEY") and not os.getenv("LLM_API_KEY") and not os.getenv("GROQ_API_KEY"):
-            base_url = _CEREBRAS_BASE_URL
-        else:
-            base_url = _GROQ_BASE_URL
         _client = OpenAI(api_key=api_key, base_url=base_url)
         logging.info("LLM client: %s", base_url)
     return _client
