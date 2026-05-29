@@ -22,7 +22,8 @@ def _log_agent_error(agent_name: str, error: Exception):
     except OSError:
         pass
 
-from tools.config import MODEL
+from tools.config import MODEL, MODEL_PLAN, MODEL_SYNTHESIS
+from tools.groq_client import groq_chat
 from agents.financials import run as run_financials
 from agents.news import run as run_news
 from agents.calc import run as run_calc
@@ -114,8 +115,7 @@ def process_turn(
         agents_to_run = []
         logging.info("[Orchestrator] conversational — no agents called")
     else:
-        plan_response = ollama.chat(model=MODEL, messages=planning_messages, options=OPT_PLAN)
-        plan_content = plan_response.message.content or ""
+        plan_content = groq_chat(MODEL_PLAN, planning_messages, temperature=0.0)
         logging.info("[timing] plan call: %.2fs", time.time() - t0)
         try:
             plan = _parse_plan(plan_content)
@@ -165,8 +165,7 @@ def process_turn(
         })
 
     t2 = time.time()
-    synthesis_response = ollama.chat(model=MODEL, messages=synthesis_messages, options=OPT_SYNTH)
-    answer = synthesis_response.message.content or ""
+    answer = groq_chat(MODEL_SYNTHESIS, synthesis_messages, temperature=0.3)
     if is_uncertain(answer):
         snippets, urls = _web_search_with_sources(user_input)
         if snippets:
@@ -174,8 +173,7 @@ def process_turn(
                 "role": "user",
                 "content": f"Web search results:\n{snippets}\n\nUse these to answer the question.",
             }]
-            web_response = ollama.chat(model=MODEL, messages=web_messages, options=OPT_SYNTH)
-            answer = web_response.message.content or answer
+            answer = groq_chat(MODEL_SYNTHESIS, web_messages, temperature=0.3) or answer
             if urls:
                 answer += "\n\n**Web sources:**\n" + "\n".join(f"- {url}" for url in urls)
             logging.info("[Orchestrator] Tavily fallback used (%d sources)", len(urls))

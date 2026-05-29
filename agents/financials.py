@@ -15,7 +15,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_income_statement",
-            "description": "Fetch the latest 3-year annual income statement for a ticker from SEC 10-K filings. Use for: annual revenue, yearly profit, full-year earnings, 3-year income trends.",
+            "description": "Fetch the latest 3-year annual income statement for a ticker from SEC 10-K filings. Use for: annual revenue, yearly profit, full-year earnings, 3-year income trends, product revenue breakdown, revenue by segment or product line, how much a company earns from each product or service category.",
             "parameters": {
                 "type": "object",
                 "properties": {"ticker": {"type": "string"}},

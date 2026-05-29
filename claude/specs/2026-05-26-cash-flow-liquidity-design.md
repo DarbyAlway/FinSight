@@ -286,11 +286,20 @@ New tests in `tests/test_tools.py`:
 
 ## Future Phases
 
-**Phase 2 — yfinance market metrics:**
-- Analyst price targets (`targetMeanPrice`, `targetHighPrice`, `targetLowPrice`) — expose from cached `ticker_info`
-- P/S ratio (`priceToSalesTrailing12Months`) — expose from cached `ticker_info`
-- P/B ratio (`priceToBook`) — expose from cached `ticker_info`
-- No new DB tables needed — all already stored in `ticker_info` JSON blob
+**Phase 2 — yfinance market metrics + SEC 8-K earnings press releases:**
+
+yfinance additions (no new DB tables — all in `ticker_info` JSON blob):
+- Analyst price targets (`targetMeanPrice`, `targetHighPrice`, `targetLowPrice`)
+- P/S ratio (`priceToSalesTrailing12Months`)
+- P/B ratio (`priceToBook`)
+
+SEC 8-K earnings press release (new `tools/earnings_press.py`):
+- Fetch the most recent 8-K Item 2.02 filing via `edgar` (`Company(ticker).get_filings(form="8-K")`)
+- Store raw text in a new `earnings_releases` DB table (same schema as `income_statements`)
+- New tool: `get_earnings_press_release(ticker) -> str` — returns the full press release text
+- Wire into `agents/financials.py` alongside income statement tools
+- Routing: add "press release", "earnings release", "8-k" to `_FINANCIAL_KEYWORDS` and `_keyword_fallback`
+- What this unlocks: beat/miss context, management guidance, headline EPS vs. actual — things not in 10-Q numbers alone
 
 **Phase 3 — Provider abstraction (any OpenAI-compatible provider):**
 
@@ -307,3 +316,30 @@ Design decisions to carry forward:
 - All 4 agents + orchestrator switch from direct `ollama.chat()` calls to `llm_chat()`
 - Expected latency improvement with Groq: plan call 10s → <1s, agent calls 8s → <2s
 - Future providers (Together AI, Fireworks, OpenRouter, Mistral, Anthropic) require zero code changes — just new env vars
+- **Provider rotation on rate limit:** `llm_chat()` iterates through a `PROVIDERS` list, catches `RateLimitError` (HTTP 429), and falls back to the next provider automatically. Callers (agents, orchestrator) never see the retry — it's transparent inside `llm_chat()`.
+- Rotation config via env vars: `FALLBACK_1_BASE_URL`, `FALLBACK_1_API_KEY`, `FALLBACK_1_MODEL` (and `FALLBACK_2_*` etc.) — adding a fallback = adding 3 env vars, zero code changes
+- Recommended provider order: Cerebras (fastest) → Groq → Gemini 2.0 Flash (generous free tier)
+- Keep the same model family across providers where possible (e.g. Llama 3.3 70B on Cerebras + Groq) — different model families have slightly different tool-call formatting which can cause inconsistent parsing on fallback
+
+**Phase 4 — Telegram bot deployment:**
+- Wrap `process_turn()` behind a Telegram bot handler (`python-telegram-bot` library)
+- One conversation = one `messages` list stored per `chat_id` in memory (or Redis for persistence)
+- No changes to orchestrator or agents — bot is a thin transport layer only
+
+**Phase 5 — FMP full earnings call transcripts:**
+
+Why FMP over alternatives:
+- SEC 8-K has the press release but not the verbatim call transcript
+- Motley Fool has free transcripts but scraping violates ToS and breaks on redesigns
+- FMP API provides clean JSON transcripts at ~$15–50/month
+
+Design:
+- New `tools/transcript.py`: `get_earnings_transcript(ticker, year, quarter) -> str`
+- FMP endpoint: `GET /v3/earning_call_transcript/{ticker}?quarter={q}&year={y}&apikey={key}`
+- Response is a list of `{speaker, title, content}` objects — format as `SPEAKER (TITLE): content`
+- Store chunked transcript in Qdrant (separate collection `earnings_transcripts`) — same dense+sparse hybrid search pattern as news
+- New tool: `search_earnings_transcript(ticker, query, top_k) -> str` — semantic search over chunks
+- New agent `agents/transcript.py` OR extend `agents/financials.py` (decision at plan time based on tool count)
+- Routing: add "transcript", "earnings call", "what did management say", "guidance" to `_FINANCIAL_KEYWORDS`
+- Config: `FMP_API_KEY` env var
+- What this unlocks: management tone, analyst concerns, forward guidance verbatim, CEO commentary on specific topics
