@@ -14,13 +14,13 @@
 
 | File | Change |
 |---|---|
-| `tools/llm.py` | **New** — `_get_client()` + `llm_chat()` + optional LangFuse generation logging |
+| `tools/llm.py` | **New** — `_get_client()` + `llm_chat()` |
 | `tools/groq_client.py` | **Deleted** |
-| `orchestrator.py` | 1 import line + 3 call-site renames |
-| `tests/test_tools.py` | 3 unit tests for `llm_chat` (raises, returns string, skips tracing gracefully) |
+| `orchestrator.py` | 1 import line + 3 call-site renames + ticker hint fix |
+| `tests/test_tools.py` | 2 unit tests for `llm_chat` |
 | `tests/test_orchestrator.py` | 8 mock-target renames (`groq_chat` → `llm_chat`) |
-| `docker-compose.langfuse.yml` | **New** — self-hosted LangFuse + Postgres |
-| `requirements.txt` | Add `langfuse>=2.0` |
+| `main.py` | Add `_init_phoenix()` + call in `__main__` |
+| `requirements.txt` | Add Phoenix packages |
 
 ---
 
@@ -222,214 +222,102 @@ git commit -m "feat: migrate orchestrator to llm_chat, delete groq_client (TDD)"
 
 ---
 
-## Task 3: LangFuse self-hosted tracing
+## Task 3: Phoenix observability (Groq + Ollama + Qdrant auto-instrumentation)
 
 **Files:**
-- Modify: `tools/llm.py`
-- Create: `docker-compose.langfuse.yml`
-- Modify: `requirements.txt`
-- Test: `tests/test_tools.py`
+- Modify: `main.py` — add optional Phoenix init + instrumentors
+- Modify: `requirements.txt` — add phoenix packages
+- No changes to `tools/llm.py` or agents (auto-instrumented at SDK level)
 
-- [ ] **Step 1: Write the failing test**
+> **Note:** Phoenix instruments the OpenAI SDK and Ollama library globally — every `llm_chat()` call and every `ollama.chat()` agent call is traced automatically with zero changes to those files.
 
-Add at the end of `tests/test_tools.py`:
-
-```python
-def test_llm_chat_works_without_langfuse_env_vars():
-    import tools.llm as llm_module
-    from unittest.mock import MagicMock, patch
-    llm_module._client = None
-    llm_module._langfuse = None
-    llm_module._langfuse_checked = False
-    mock_response = MagicMock()
-    mock_response.choices[0].message.content = "answer"
-    with patch("tools.llm.os.getenv", side_effect=lambda k, *d: {
-            "LLM_API_KEY": "fake-key",
-            "LLM_BASE_URL": "https://api.groq.com/openai/v1",
-        }.get(k, None)), \
-         patch("tools.llm.OpenAI") as mock_openai_cls:
-        mock_openai_cls.return_value.chat.completions.create.return_value = mock_response
-        result = llm_module.llm_chat("test-model", [{"role": "user", "content": "hi"}])
-    assert result == "answer"
-    assert llm_module._langfuse is None  # no tracing when vars absent
-    llm_module._client = None
-    llm_module._langfuse = None
-    llm_module._langfuse_checked = False
-```
-
-- [ ] **Step 2: Run to verify it fails**
+- [ ] **Step 1: Install Phoenix packages in the conda env**
 
 ```
-conda run -n stock pytest tests/test_tools.py::test_llm_chat_works_without_langfuse_env_vars -v
+conda run -n stock pip install "arize-phoenix>=4.0" "openinference-instrumentation-openai>=0.1" "openinference-instrumentation-ollama>=0.1" -q
 ```
 
-Expected: FAIL — `AttributeError: module 'tools.llm' has no attribute '_langfuse'`
-
-- [ ] **Step 3: Add LangFuse opt-in tracing to `tools/llm.py`**
-
-Replace the full content of `tools/llm.py` with:
-
-```python
-import logging
-import os
-import time
-
-from openai import OpenAI
-
-_DEFAULT_BASE_URL = "https://api.groq.com/openai/v1"
-_client: OpenAI | None = None
-_langfuse = None
-_langfuse_checked: bool = False
-
-
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        api_key = os.getenv("LLM_API_KEY") or os.getenv("GROQ_API_KEY")
-        if not api_key:
-            raise RuntimeError("LLM_API_KEY not set in environment")
-        base_url = os.getenv("LLM_BASE_URL", _DEFAULT_BASE_URL)
-        _client = OpenAI(api_key=api_key, base_url=base_url)
-    return _client
-
-
-def _get_langfuse():
-    global _langfuse, _langfuse_checked
-    if _langfuse_checked:
-        return _langfuse
-    _langfuse_checked = True
-    host = os.getenv("LANGFUSE_HOST")
-    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
-    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
-    if host and public_key and secret_key:
-        try:
-            from langfuse import Langfuse
-            _langfuse = Langfuse(host=host, public_key=public_key, secret_key=secret_key)
-            logging.info("LangFuse tracing enabled (%s)", host)
-        except Exception as e:
-            logging.warning("LangFuse init failed — tracing disabled: %s", e)
-    return _langfuse
-
-
-def llm_chat(model: str, messages: list[dict], temperature: float = 0.0) -> str:
-    start = time.perf_counter()
-    try:
-        response = _get_client().chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-        )
-        content = response.choices[0].message.content or ""
-        latency = round(time.perf_counter() - start, 3)
-        lf = _get_langfuse()
-        if lf:
-            try:
-                gen = lf.generation(
-                    name="llm_chat",
-                    model=model,
-                    input=messages,
-                    output=content,
-                    metadata={"temperature": temperature, "latency_s": latency},
-                )
-                gen.end()
-            except Exception as e:
-                logging.warning("LangFuse logging failed: %s", e)
-        return content
-    except Exception as e:
-        logging.error("llm_chat failed: %s", e)
-        raise
-```
-
-- [ ] **Step 4: Run all three llm tests to verify they pass**
-
-```
-conda run -n stock pytest tests/test_tools.py::test_get_client_raises_when_no_api_key tests/test_tools.py::test_llm_chat_returns_string tests/test_tools.py::test_llm_chat_works_without_langfuse_env_vars -v
-```
-
-Expected: 3 PASSED
-
-- [ ] **Step 5: Add `langfuse>=2.0` to `requirements.txt`**
+- [ ] **Step 2: Add packages to `requirements.txt`**
 
 Open `requirements.txt` and add:
 ```
-langfuse>=2.0
+arize-phoenix>=4.0
+openinference-instrumentation-openai>=0.1
+openinference-instrumentation-ollama>=0.1
 ```
 
-- [ ] **Step 6: Install langfuse in the conda env**
+- [ ] **Step 3: Add `_init_phoenix()` to `main.py`**
 
-```
-conda run -n stock pip install "langfuse>=2.0" -q
-```
+After the existing imports in `main.py`, add this function (before `_build_persona_system`):
 
-- [ ] **Step 7: Create `docker-compose.langfuse.yml`**
-
-Create this file at the project root:
-
-```yaml
-version: "3.5"
-services:
-  langfuse-server:
-    image: langfuse/langfuse:2
-    depends_on:
-      db:
-        condition: service_healthy
-    ports:
-      - "3000:3000"
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/langfuse
-      NEXTAUTH_SECRET: change-me-in-production
-      SALT: change-me-in-production
-      NEXTAUTH_URL: http://localhost:3000
-      TELEMETRY_ENABLED: "false"
-      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
-
-  db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    environment:
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: langfuse
-    volumes:
-      - langfuse_pgdata:/var/lib/postgresql/data
-
-volumes:
-  langfuse_pgdata:
+```python
+def _init_phoenix():
+    try:
+        import phoenix as px
+        from openinference.instrumentation.openai import OpenAIInstrumentor
+        from openinference.instrumentation.ollama import OllamaInstrumentor
+        session = px.launch_app()
+        OpenAIInstrumentor().instrument()
+        OllamaInstrumentor().instrument()
+        logging.info("Phoenix tracing enabled: %s", session.url)
+    except ImportError:
+        pass
+    except Exception as e:
+        logging.warning("Phoenix init failed — tracing disabled: %s", e)
 ```
 
-- [ ] **Step 8: Run full test suite to check for regressions**
+- [ ] **Step 4: Call `_init_phoenix()` in the `__main__` block**
+
+Find the `if __name__ == "__main__":` block at the bottom of `main.py`:
+
+```python
+if __name__ == "__main__":
+    init_db()
+    init_qdrant()
+    _get_anchor_vecs()
+    chat()
+```
+
+Change to:
+
+```python
+if __name__ == "__main__":
+    init_db()
+    init_qdrant()
+    _get_anchor_vecs()
+    _init_phoenix()
+    chat()
+```
+
+- [ ] **Step 5: Run full test suite to confirm no regressions**
 
 ```
 conda run -n stock pytest tests/test_tools.py tests/test_agents.py tests/test_orchestrator.py -q 2>&1 | tail -5
 ```
 
-Expected: 87 passed (86 existing + 1 new)
+Expected: 87 passed, 0 failures
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add tools/llm.py tests/test_tools.py requirements.txt docker-compose.langfuse.yml
-git commit -m "feat: add optional LangFuse tracing to llm_chat (self-hosted)"
+git add main.py requirements.txt
+git commit -m "feat: add Phoenix auto-instrumentation for Groq + Ollama tracing"
 ```
 
 ---
 
-## How to start LangFuse locally
+## How to use Phoenix
 
-```bash
-docker compose -f docker-compose.langfuse.yml up -d
-```
-
-Then open `http://localhost:3000`, create an account, and copy the keys into `.env`:
+When you run `python main.py`, Phoenix starts automatically and prints a URL:
 
 ```
-LANGFUSE_HOST=http://localhost:3000
-LANGFUSE_PUBLIC_KEY=pk-lf-...
-LANGFUSE_SECRET_KEY=sk-lf-...
+Phoenix tracing enabled: http://localhost:6006
 ```
 
-To switch to cloud later — just change `LANGFUSE_HOST` to `https://cloud.langfuse.com` and update the keys. Zero code changes.
+Open `http://localhost:6006` in your browser to see:
+- Every Groq plan + synthesis call with full query and response
+- Every Ollama agent call with tool arguments
+- Latency breakdown per step
+- Token counts per call
+
+**To switch to Phoenix cloud later** — just set `PHOENIX_COLLECTOR_ENDPOINT=https://app.phoenix.arize.com/...` in `.env`. Zero code changes.
