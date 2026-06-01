@@ -16,7 +16,7 @@ SYNONYMS = {
     "eps":              ["%earnings per share%", "%diluted%"],
 }
 
-MODEL = "qwen3:14b"          # agents — local Ollama
-MODEL_AGENT = "qwen3:14b"    # agents — local Ollama
-MODEL_PLAN = "qwen3:14b"     # orchestrator planning — local Ollama
-MODEL_SYNTHESIS = "qwen3:14b" # synthesis — local Ollama
+MODEL = "qwen2.5:14b"          # agents — local Ollama
+MODEL_AGENT = "qwen2.5:14b"    # agents — better tool-calling fine-tune
+MODEL_PLAN = "qwen3:14b"       # orchestrator planning — better at JSON reasoning
+MODEL_SYNTHESIS = "qwen3:14b"  # synthesis — better at reasoning/summarization
