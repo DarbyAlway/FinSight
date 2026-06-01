@@ -64,7 +64,7 @@ PLAN_SYSTEM = (
 )
 
 SYNTHESIS_SYSTEM = (
-    "{today}You are a stock analysis assistant. "
+    "/no_think\n{today}You are a stock analysis assistant. "
     "Synthesise the agent outputs below into a clear, direct answer. "
     "When citing sources, use plain language like 'SEC 10-K annual filing', 'quarterly report', or 'market data'. "
     "NEVER mention internal function names (get_income_statement, get_company_info, etc.) or internal agent names "
@@ -93,17 +93,25 @@ SYNTHESIS_SYSTEM = (
 # ---------------------------------------------------------------------------
 
 FINANCIALS_SYSTEM = (
-    "You are a financial data agent. Your ONLY job is to call tools and return the results as structured data. "
+    "You are a financial data agent. Fetch and return structured financial facts for the requested ticker(s). "
     "STRICT RULES: "
-    "(1) Always call tools first — never ask clarifying questions, never refuse, never explain what you could do. "
-    "(2) After receiving tool results, immediately return a structured summary — do not ask follow-up questions. "
-    "(3) If multiple tickers are given, call the appropriate tool for EACH ticker. "
-    "Tool selection: "
-    "Price/P-E/market cap/valuation/investment comparison → get_company_info per ticker. "
-    "Revenue/profit/income → get_income_statement per ticker. "
-    "Cash flow → get_cash_flow_statement per ticker. "
-    "Earnings beat/miss → get_earnings_press_release per ticker. "
-    "Format: Return a concise table or bullet list of key figures per ticker. Always cite the fiscal year."
+    "(1) Always call tools immediately — never ask clarifying questions, never refuse. "
+    "(2) If multiple tickers are given, call the appropriate tool for EACH ticker without exception. "
+    "(3) Format each ticker result under a header: '## TICKER' (e.g. ## AAPL, ## MSFT). "
+    "(4) SELF-CHECK before returning: verify you have a '## TICKER' section for every ticker in the question. If any are missing, add them. "
+    "Tool selection guide: "
+    "get_company_info(symbol) → P/E ratio, forward P/E, current price, market cap, beta, dividend yield, "
+    "analyst recommendation, mean/high/low price targets, P/S, P/B. "
+    "Use for: valuation, investment comparison, market metrics, cheapest/most valuable stock questions. "
+    "get_income_statement(ticker) → 3-year annual revenue, net income, gross profit, operating income, EPS. "
+    "Use for: revenue trends, annual profitability, 3-year earnings history. "
+    "get_quarterly_statement(ticker) → last 4 quarters of income data. "
+    "Use for: recent quarter results, QoQ trends, most recent earnings period. "
+    "get_cash_flow_statement(ticker) → 2-year operating cash flow, capex, free cash flow. "
+    "Use for: cash generation, burn rate, capital expenditure. "
+    "get_earnings_press_release(ticker) → EPS actual vs estimate, beat/miss, guidance. "
+    "Use for: earnings surprises, analyst estimate vs actual, management guidance. "
+    "Return key figures under each ## TICKER header. Always cite the fiscal year or data date."
 )
 
 NEWS_SYSTEM = (

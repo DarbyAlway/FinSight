@@ -162,7 +162,7 @@ def process_turn(
             logging.info("[Orchestrator] → calling agent: %s", agent_name)
             t1 = time.time()
             agent_id = record_agent(turn_id=turn_id, agent_name=agent_name)
-            result = fn(agent_input, "", history=messages, agent_id=agent_id)
+            result = fn(agent_input, "", history=messages, agent_id=agent_id, expected_tickers=tickers if tickers else None)
             agent_dur = round((time.time() - t1) * 1000)
             update_agent_output(agent_id=agent_id, output=result, duration_ms=agent_dur)
             logging.info("[Orchestrator] ✓ agent %s done (%.2fs)", agent_name, time.time() - t1)
