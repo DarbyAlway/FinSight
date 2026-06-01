@@ -202,7 +202,7 @@ def process_turn(
     logging.info("[Synthesis] model=%s agents_context=%d chars", MODEL_SYNTHESIS, len(accumulated_context))
     answer = llm_chat(MODEL_SYNTHESIS, synthesis_messages, temperature=0.3)
     logging.info("[Synthesis] output preview: %s", answer[:120].replace("\n", " "))
-    if agents_to_run and is_uncertain(answer):
+    if agents_to_run and is_uncertain(answer, threshold=0.85):
         snippets, urls = _web_search_with_sources(user_input)
         if snippets:
             web_messages = synthesis_messages + [{
