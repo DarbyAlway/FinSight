@@ -7,6 +7,7 @@ load_dotenv()
 from edgar import set_identity
 
 from tools.config import MODEL
+from monitoring import init_db as init_monitoring_db
 from tools.db import init_db
 from tools.vector import init_qdrant
 from tools.search_guardrails import _get_anchor_vecs, web_search_fallback, is_uncertain
@@ -100,6 +101,7 @@ def chat():
 
 
 if __name__ == "__main__":
+    init_monitoring_db()
     init_db()
     init_qdrant()
     _get_anchor_vecs()

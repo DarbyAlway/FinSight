@@ -25,7 +25,7 @@ def _log_agent_error(agent_name: str, error: Exception):
 
 from tools.config import MODEL, MODEL_PLAN, MODEL_SYNTHESIS
 from tools.llm import llm_chat
-from tools.monitoring import record_agent_call, record_turn
+from monitoring import record_turn, record_agent, update_turn_synthesis, init_db
 from agents.financials import run as run_financials
 from agents.news import run as run_news
 from agents.calc import run as run_calc
@@ -116,11 +116,13 @@ def process_turn(
     ]
     t0 = time.time()
     tickers: list[str] = []
+    orchestrator_plan_text = ""
     if _is_conversational(user_input):
         agents_to_run = []
         logging.info("[Orchestrator] conversational — no agents called")
     else:
         plan_content = llm_chat(MODEL_PLAN, planning_messages, temperature=0.0)
+        orchestrator_plan_text = plan_content
         logging.info("[timing] plan call: %.2fs", time.time() - t0)
         try:
             plan = _parse_plan(plan_content)
@@ -132,6 +134,13 @@ def process_turn(
             logging.warning("[Orchestrator] plan JSON malformed — using keyword fallback")
             agents_to_run = _keyword_fallback(user_input)
             logging.info("[Orchestrator] keyword fallback → agents=%s", agents_to_run)
+
+    # Record turn start - capture user query and plan
+    turn_id = record_turn(
+        user_query=user_input,
+        orchestrator_plan=orchestrator_plan_text if not _is_conversational(user_input) else None,
+        agents_called=agents_to_run,
+    )
 
     accumulated_context = ""
     agent_map = {
@@ -154,7 +163,7 @@ def process_turn(
             t1 = time.time()
             result = fn(agent_input, "", history=messages)
             agent_dur = round((time.time() - t1) * 1000)
-            record_agent_call(agent_name, duration_ms=agent_dur)
+            record_agent(turn_id=turn_id, agent_name=agent_name, duration_ms=agent_dur, output=result)
             logging.info("[Orchestrator] ✓ agent %s done (%.2fs)", agent_name, time.time() - t1)
             return agent_name, result
         except Exception as e:
@@ -203,7 +212,9 @@ def process_turn(
             logging.info("[Orchestrator] Tavily fallback used (%d sources)", len(urls))
     logging.info("[timing] synthesis call: %.2fs", time.time() - t2)
     logging.info("[timing] total turn: %.2fs", time.time() - t0)
-    record_turn(agents_to_run, duration_ms=round((time.time() - t0) * 1000))
+
+    # Save synthesis output and total duration
+    update_turn_synthesis(turn_id=turn_id, synthesis_output=answer)
 
     updated_messages = messages + [
         {"role": "user", "content": user_input},
