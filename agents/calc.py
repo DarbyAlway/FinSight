@@ -118,7 +118,7 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
             logging.info("[CalcAgent] %s(%s)", name, args)
             if agent_id is not None:
-                record_tool(agent_id=agent_id, tool_name=name, duration_ms=_dur, arguments=args, error=_err)
+                record_tool(agent_id=agent_id, tool_name=name, duration_ms=_dur, arguments=args, result=result if not _err else None, error=_err)
         response = _chat(
             model=MODEL_AGENT,
             messages=messages,

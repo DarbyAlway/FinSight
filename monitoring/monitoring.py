@@ -54,13 +54,19 @@ def init_db():
                     agent_id INTEGER NOT NULL,
                     tool_name TEXT NOT NULL,
                     arguments TEXT,
+                    result TEXT,
                     duration_ms REAL,
                     cache_hit BOOLEAN,
                     error TEXT,
                     FOREIGN KEY (agent_id) REFERENCES agents(id)
                 )
             """)
-            conn.commit()
+            # Migrate existing DB — add result column if missing
+            try:
+                conn.execute("ALTER TABLE tools ADD COLUMN result TEXT")
+                conn.commit()
+            except Exception:
+                pass  # column already exists
         finally:
             conn.close()
 
@@ -114,20 +120,21 @@ def record_agent(turn_id: int, agent_name: str, duration_ms: float = None,
             conn.close()
 
 def record_tool(agent_id: int, tool_name: str, duration_ms: float = None,
-                arguments: dict = None, cache_hit: bool = False, error: str = None):
+                arguments: dict = None, result: str = None, cache_hit: bool = False, error: str = None):
     """Record a tool call for an agent."""
     with _lock:
         conn = _get_connection()
         try:
             conn.execute(
                 """
-                INSERT INTO tools (agent_id, tool_name, arguments, duration_ms, cache_hit, error)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO tools (agent_id, tool_name, arguments, result, duration_ms, cache_hit, error)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     agent_id,
                     tool_name,
                     json.dumps(arguments or {}),
+                    result,
                     duration_ms,
                     cache_hit,
                     error,

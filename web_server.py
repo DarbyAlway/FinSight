@@ -306,6 +306,10 @@ async function loadTurns() {
                         <div class="tool-body" id="${tid}">
                             <div style="font-size:11px;font-weight:600;color:#666;margin-bottom:4px;">Arguments</div>
                             <div class="tool-args">${esc(JSON.stringify(tool.arguments, null, 2))}</div>
+                            ${tool.result ? `
+                                <div style="font-size:11px;font-weight:600;color:#666;margin:8px 0 4px;">Response</div>
+                                <div class="tool-args" style="max-height:200px;border-left:3px solid #4361ee;">${esc(tool.result)}</div>
+                            ` : ''}
                             ${tool.error ? `<div class="error-text">Error: ${esc(tool.error)}</div>` : ''}
                         </div>
                     </div>`;
