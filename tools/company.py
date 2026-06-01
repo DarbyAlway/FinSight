@@ -39,11 +39,10 @@ def get_company_info(symbol: str) -> str:
     market_cap = info.get('marketCap', 0) or 0
     market_cap_str = f"${market_cap/1e12:.2f}T" if market_cap >= 1e12 else f"${market_cap/1e9:.1f}B"
 
-    raw_yield = info.get('dividendYield') or 0
-    # yfinance returns dividendYield as a decimal fraction (0.0073 = 0.73%)
-    # but some versions return it already multiplied (0.73 = 0.73%) — cap sanity check
-    div_yield_pct = raw_yield if raw_yield > 1 else raw_yield * 100
-    div_yield_str = f"{div_yield_pct:.2f}%" if raw_yield else "N/A"
+    # trailingAnnualDividendYield is reliable (decimal fraction e.g. 0.0083 = 0.83%)
+    # dividendYield in this yfinance version is buggy (returns 0.81 instead of 0.0083)
+    raw_yield = info.get('trailingAnnualDividendYield') or 0
+    div_yield_str = f"{raw_yield * 100:.2f}%" if raw_yield else "N/A"
 
     lines = [
         f"{info.get('longName', symbol)} ({symbol})",
