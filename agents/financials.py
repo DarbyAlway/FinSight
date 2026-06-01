@@ -166,7 +166,7 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
         if missing:
             logging.info("[FinancialsAgent] self-critique: missing %s — requesting completion", missing)
             messages.append({"role": "assistant", "content": summary})
-            messages.append({"role": "user", "content": f"Your response is missing data for: {', '.join(missing)}. Add a ## TICKER section for each one now."})
+            messages.append({"role": "user", "content": f"Your response is missing data for: {', '.join(missing)}. Return ONLY the ## TICKER sections for these missing tickers — do not repeat tickers already covered."})
             fix_response = client.chat.completions.create(
                 model=MODEL_AGENT,
                 messages=messages,
