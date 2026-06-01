@@ -164,7 +164,7 @@ def process_turn(
             agent_id = record_agent(turn_id=turn_id, agent_name=agent_name)
             result = fn(agent_input, "", history=messages, agent_id=agent_id)
             agent_dur = round((time.time() - t1) * 1000)
-            update_agent_output(agent_id=agent_id, output=result)
+            update_agent_output(agent_id=agent_id, output=result, duration_ms=agent_dur)
             logging.info("[Orchestrator] ✓ agent %s done (%.2fs)", agent_name, time.time() - t1)
             return agent_name, result
         except Exception as e:
@@ -218,7 +218,7 @@ def process_turn(
     logging.info("[timing] total turn: %.2fs", time.time() - t0)
 
     # Save synthesis output and total duration
-    update_turn_synthesis(turn_id=turn_id, synthesis_output=answer)
+    update_turn_synthesis(turn_id=turn_id, synthesis_output=answer, total_duration_ms=round((time.time() - t0) * 1000))
 
     updated_messages = messages + [
         {"role": "user", "content": user_input},

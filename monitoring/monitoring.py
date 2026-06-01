@@ -137,27 +137,27 @@ def record_tool(agent_id: int, tool_name: str, duration_ms: float = None,
         finally:
             conn.close()
 
-def update_agent_output(agent_id: int, output: str):
-    """Update an agent record with its final output."""
+def update_agent_output(agent_id: int, output: str, duration_ms: float | None = None):
+    """Update an agent record with its final output and duration."""
     with _lock:
         conn = _get_connection()
         try:
             conn.execute(
-                "UPDATE agents SET output = ? WHERE id = ?",
-                (output, agent_id)
+                "UPDATE agents SET output = ?, duration_ms = ? WHERE id = ?",
+                (output, duration_ms, agent_id)
             )
             conn.commit()
         finally:
             conn.close()
 
-def update_turn_synthesis(turn_id: int, synthesis_output: str):
-    """Update a turn with the synthesis output."""
+def update_turn_synthesis(turn_id: int, synthesis_output: str, total_duration_ms: float | None = None):
+    """Update a turn with synthesis output and total duration."""
     with _lock:
         conn = _get_connection()
         try:
             conn.execute(
-                "UPDATE turns SET synthesis_output = ? WHERE id = ?",
-                (synthesis_output, turn_id)
+                "UPDATE turns SET synthesis_output = ?, total_duration_ms = ? WHERE id = ?",
+                (synthesis_output, total_duration_ms, turn_id)
             )
             conn.commit()
         finally:
