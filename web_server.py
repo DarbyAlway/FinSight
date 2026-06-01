@@ -79,6 +79,49 @@ DASHBOARD_HTML = """
         .pill-blue { background: #e8f0fe; color: #4361ee; }
         .pill-green { background: #e8f5e9; color: #2e7d32; }
         .pill-gray { background: #f0f0f0; color: #666; }
+        .pill-orange { background: #fff3e0; color: #e65100; font-weight: 600; }
+
+        .token-badge {
+            display: inline-block;
+            background: #fff3e0;
+            color: #e65100;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 6px;
+        }
+
+        .token-breakdown {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-top: 6px;
+        }
+
+        .token-stat {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: #fff8f0;
+            border: 1px solid #ffe0b2;
+            border-radius: 6px;
+            padding: 8px 14px;
+            min-width: 90px;
+        }
+
+        .token-stat-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: #e65100;
+        }
+
+        .token-stat-label {
+            font-size: 10px;
+            color: #999;
+            text-transform: uppercase;
+            margin-top: 2px;
+        }
 
         .toggle-icon { font-size: 12px; color: #aaa; transition: transform 0.2s; }
         .toggle-icon.open { transform: rotate(90deg); }
@@ -276,9 +319,9 @@ async function loadTurns() {
                             <span class="agent-name">${esc(agent.agent_name)}</span>
                             <span class="agent-meta" style="margin-left:10px;">
                                 ${fmt_ms(agent.duration_ms)}
-                                ${agent.tokens ? '&bull; ' + agent.tokens + ' tokens' : ''}
                                 &bull; ${(agent.tools || []).length} tools
                             </span>
+                            ${agent.tokens ? `<span class="token-badge">${agent.tokens.toLocaleString()} tok</span>` : ''}
                         </div>
                         <span class="toggle-icon">&#9658;</span>
                     </div>
@@ -306,7 +349,7 @@ async function loadTurns() {
                         <div class="turn-pills">
                             <span class="pill pill-blue">${agentCount} agent${agentCount !== 1 ? 's' : ''}</span>
                             <span class="pill pill-green">${fmt_ms(turn.total_duration_ms)}</span>
-                            ${turn.total_tokens ? `<span class="pill pill-gray">${turn.total_tokens} tokens</span>` : ''}
+                            ${turn.total_tokens ? `<span class="pill pill-orange">${turn.total_tokens.toLocaleString()} tokens</span>` : ''}
                         </div>
                     </div>
                     <span class="toggle-icon" id="${iid}">&#9658;</span>
@@ -329,6 +372,26 @@ async function loadTurns() {
                         <div class="section-label">Agents (${agentCount})</div>
                         ${agentsHtml || '<div style="color:#aaa;font-size:12px;">No agents called</div>'}
                     </div>
+
+                    ${(turn.total_tokens || (turn.agents || []).some(a => a.tokens)) ? `
+                        <div class="detail-section">
+                            <div class="section-label">Token Usage</div>
+                            <div class="token-breakdown">
+                                ${(turn.agents || []).filter(a => a.tokens).map(a => `
+                                    <div class="token-stat">
+                                        <div class="token-stat-value">${a.tokens.toLocaleString()}</div>
+                                        <div class="token-stat-label">${esc(a.agent_name)}</div>
+                                    </div>
+                                `).join('')}
+                                ${turn.total_tokens ? `
+                                    <div class="token-stat" style="border-color:#ff8f00;background:#fff3e0;">
+                                        <div class="token-stat-value">${turn.total_tokens.toLocaleString()}</div>
+                                        <div class="token-stat-label">Total</div>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    ` : ''}
 
                     ${turn.synthesis_output ? `
                         <div class="detail-section">
