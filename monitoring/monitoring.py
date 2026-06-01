@@ -180,6 +180,18 @@ def update_turn_synthesis(turn_id: int, synthesis_output: str, total_duration_ms
         finally:
             conn.close()
 
+def get_turn_agent_tokens(turn_id: int) -> int:
+    """Sum all agent tokens for a turn."""
+    with _lock:
+        conn = _get_connection()
+        try:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(tokens), 0) FROM agents WHERE turn_id = ?", (turn_id,)
+            ).fetchone()
+            return int(row[0]) if row else 0
+        finally:
+            conn.close()
+
 def get_all_turns():
     """Fetch all turns with their agents and tools, ordered by timestamp DESC."""
     with _lock:

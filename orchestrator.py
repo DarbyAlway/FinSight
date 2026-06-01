@@ -25,7 +25,7 @@ def _log_agent_error(agent_name: str, error: Exception):
 
 from tools.config import MODEL, MODEL_PLAN, MODEL_SYNTHESIS
 from tools.llm import llm_chat
-from monitoring import record_turn, record_agent, update_agent_output, update_turn_synthesis, init_db
+from monitoring import record_turn, record_agent, update_agent_output, update_turn_synthesis, get_turn_agent_tokens, init_db
 from agents.financials import run as run_financials
 from agents.news import run as run_news
 from agents.calc import run as run_calc
@@ -221,9 +221,10 @@ def process_turn(
             logging.info("[Orchestrator] Tavily fallback used (%d sources)", len(urls))
     logging.info("[timing] synthesis call: %.2fs", time.time() - t2)
 
-    total_tokens = plan_tokens + synth_tokens if not _is_conversational(user_input) else synth_tokens
-    logging.info("[tokens] plan=%d synthesis=%d total=%d",
-                 plan_tokens if not _is_conversational(user_input) else 0, synth_tokens, total_tokens)
+    agent_tokens = get_turn_agent_tokens(turn_id)
+    total_tokens = plan_tokens + agent_tokens + synth_tokens
+    logging.info("[tokens] plan=%d agents=%d synthesis=%d total=%d",
+                 plan_tokens, agent_tokens, synth_tokens, total_tokens)
     logging.info("[timing] total turn: %.2fs", time.time() - t0)
 
     # Save synthesis output, total duration and total tokens
