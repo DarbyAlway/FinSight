@@ -199,7 +199,9 @@ def process_turn(
         })
 
     t2 = time.time()
+    logging.info("[Synthesis] model=%s agents_context=%d chars", MODEL_SYNTHESIS, len(accumulated_context))
     answer = llm_chat(MODEL_SYNTHESIS, synthesis_messages, temperature=0.3)
+    logging.info("[Synthesis] output preview: %s", answer[:120].replace("\n", " "))
     if agents_to_run and is_uncertain(answer):
         snippets, urls = _web_search_with_sources(user_input)
         if snippets:
@@ -208,6 +210,7 @@ def process_turn(
                 "content": f"Web search results:\n{snippets}\n\nUse these to answer the question.",
             }]
             answer = llm_chat(MODEL_SYNTHESIS, web_messages, temperature=0.3) or answer
+            logging.info("[Synthesis] web-fallback output preview: %s", answer[:120].replace("\n", " "))
             if urls:
                 answer += "\n\n**Web sources:**\n" + "\n".join(f"- {url}" for url in urls)
             logging.info("[Orchestrator] Tavily fallback used (%d sources)", len(urls))
