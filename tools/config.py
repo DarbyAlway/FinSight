@@ -16,7 +16,7 @@ SYNONYMS = {
     "eps":              ["%earnings per share%", "%diluted%"],
 }
 
-MODEL = "qwen3:30b-a3b"          # agents — local Ollama
-MODEL_AGENT = "qwen3:30b-a3b"    # agents — 30B MoE, better ticker resolution + tool calling
-MODEL_PLAN = "qwen3:30b-a3b"     # orchestrator planning — better JSON reasoning
-MODEL_SYNTHESIS = "qwen3:30b-a3b" # synthesis — better analysis quality
+MODEL = "qwen2.5:14b"             # default
+MODEL_AGENT = "qwen2.5:14b"      # agents — no thinking mode, reliable tool calling
+MODEL_PLAN = "qwen3:30b-a3b"     # planner — smarter ticker resolution (add /no_think prefix)
+MODEL_SYNTHESIS = "qwen3:14b"    # synthesis — good reasoning, faster than 30b

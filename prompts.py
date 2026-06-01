@@ -37,7 +37,7 @@ TIME_SENSITIVE_KEYWORDS = {
 # ---------------------------------------------------------------------------
 
 PLAN_SYSTEM = (
-    "{today}You are a stock analysis orchestrator. Given the user's question, output a JSON plan "
+    "/no_think\n{today}You are a stock analysis orchestrator. Given the user's question, output a JSON plan "
     "with the agents to call and the tickers involved. "
     "Available agents: "
     "'financials' (income statements, quarterly results, company market info, P/E ratio, EPS, "
