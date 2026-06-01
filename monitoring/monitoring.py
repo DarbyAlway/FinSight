@@ -137,6 +137,19 @@ def record_tool(agent_id: int, tool_name: str, duration_ms: float = None,
         finally:
             conn.close()
 
+def update_agent_output(agent_id: int, output: str):
+    """Update an agent record with its final output."""
+    with _lock:
+        conn = _get_connection()
+        try:
+            conn.execute(
+                "UPDATE agents SET output = ? WHERE id = ?",
+                (output, agent_id)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
 def update_turn_synthesis(turn_id: int, synthesis_output: str):
     """Update a turn with the synthesis output."""
     with _lock:

@@ -25,7 +25,7 @@ def _log_agent_error(agent_name: str, error: Exception):
 
 from tools.config import MODEL, MODEL_PLAN, MODEL_SYNTHESIS
 from tools.llm import llm_chat
-from monitoring import record_turn, record_agent, update_turn_synthesis, init_db
+from monitoring import record_turn, record_agent, update_agent_output, update_turn_synthesis, init_db
 from agents.financials import run as run_financials
 from agents.news import run as run_news
 from agents.calc import run as run_calc
@@ -161,9 +161,10 @@ def process_turn(
         try:
             logging.info("[Orchestrator] → calling agent: %s", agent_name)
             t1 = time.time()
-            result = fn(agent_input, "", history=messages)
+            agent_id = record_agent(turn_id=turn_id, agent_name=agent_name)
+            result = fn(agent_input, "", history=messages, agent_id=agent_id)
             agent_dur = round((time.time() - t1) * 1000)
-            record_agent(turn_id=turn_id, agent_name=agent_name, duration_ms=agent_dur, output=result)
+            update_agent_output(agent_id=agent_id, output=result)
             logging.info("[Orchestrator] ✓ agent %s done (%.2fs)", agent_name, time.time() - t1)
             return agent_name, result
         except Exception as e:

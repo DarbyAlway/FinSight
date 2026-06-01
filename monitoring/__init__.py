@@ -2,16 +2,18 @@ from .monitoring import (
     init_db,
     record_turn,
     record_agent,
+    update_agent_output,
     record_tool,
-    get_all_turns,
     update_turn_synthesis,
+    get_all_turns,
 )
 
 __all__ = [
     "init_db",
     "record_turn",
     "record_agent",
+    "update_agent_output",
     "record_tool",
-    "get_all_turns",
     "update_turn_synthesis",
+    "get_all_turns",
 ]

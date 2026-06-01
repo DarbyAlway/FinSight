@@ -3,7 +3,7 @@ import time
 import logging
 
 from tools.llm import _get_client
-from tools.monitoring import record_tool_call, record_token_usage
+from monitoring import record_tool
 from tools.config import MODEL_AGENT
 from tools.calc import (
     calculate_dcf, calculate_peg, calculate_pe_vs_sector,
@@ -60,7 +60,7 @@ TOOL_FUNCTIONS = {
 OPT = {"temperature": 0.1}
 
 
-def run(user_question: str, context: str = "", history: list[dict] | None = None) -> str:
+def run(user_question: str, context: str = "", history: list[dict] | None = None, agent_id: int | None = None) -> str:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if history:
         messages += history[-6:]
@@ -76,11 +76,9 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
         model=MODEL_AGENT,
         messages=messages,
         tools=TOOLS,
-        parallel_tool_calls=True,
+        tool_choice="required",
         temperature=OPT["temperature"],
     )
-    if response.usage:
-        record_token_usage("CalcAgent", response.usage.prompt_tokens, response.usage.completion_tokens)
     msg = response.choices[0].message
 
     while msg.tool_calls:
@@ -108,16 +106,14 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
             _err = result[:120] if isinstance(result, str) and result.startswith("TOOL_ERROR") else None
             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
             logging.info("[CalcAgent] %s(%s)", name, args)
-            record_tool_call("CalcAgent", name, args, duration_ms=_dur, error=_err)
+            if agent_id is not None:
+                record_tool(agent_id=agent_id, tool_name=name, duration_ms=_dur, arguments=args, error=_err)
         response = client.chat.completions.create(
             model=MODEL_AGENT,
             messages=messages,
             tools=TOOLS,
-            parallel_tool_calls=True,
             temperature=OPT["temperature"],
         )
-        if response.usage:
-            record_token_usage("CalcAgent", response.usage.prompt_tokens, response.usage.completion_tokens)
         msg = response.choices[0].message
 
     return msg.content or ""
