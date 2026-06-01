@@ -3,7 +3,7 @@ import time
 import logging
 
 from tools.llm import _get_client
-from monitoring import record_tool, record_agent
+from monitoring import record_tool, record_agent, update_agent_tokens
 from tools.config import MODEL_AGENT
 from tools.income import get_income_statement, get_quarterly_statement
 from tools.company import get_company_info
@@ -171,8 +171,11 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
         msg = response.choices[0].message
 
     summary = msg.content or ""
+    total_tokens = total_prompt_tokens + total_completion_tokens
     logging.info("[FinancialsAgent] tokens: prompt=%d completion=%d total=%d",
-                 total_prompt_tokens, total_completion_tokens, total_prompt_tokens + total_completion_tokens)
+                 total_prompt_tokens, total_completion_tokens, total_tokens)
+    if agent_id is not None:
+        update_agent_tokens(agent_id, total_tokens)
 
     if expected_tickers:
         missing = [t for t in expected_tickers if t not in summary]

@@ -3,7 +3,7 @@ import time
 import logging
 
 from tools.llm import _get_client
-from monitoring import record_tool
+from monitoring import record_tool, update_agent_tokens
 from tools.config import MODEL_AGENT
 from tools.news import get_stock_news, search_news
 from prompts import NEWS_SYSTEM as SYSTEM_PROMPT
@@ -118,6 +118,9 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
         )
         msg = response.choices[0].message
 
+    total_tokens = total_prompt_tokens + total_completion_tokens
     logging.info("[NewsAgent] tokens: prompt=%d completion=%d total=%d",
-                 total_prompt_tokens, total_completion_tokens, total_prompt_tokens + total_completion_tokens)
+                 total_prompt_tokens, total_completion_tokens, total_tokens)
+    if agent_id is not None:
+        update_agent_tokens(agent_id, total_tokens)
     return msg.content or ""

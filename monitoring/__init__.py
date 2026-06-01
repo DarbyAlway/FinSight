@@ -3,6 +3,7 @@ from .monitoring import (
     record_turn,
     record_agent,
     update_agent_output,
+    update_agent_tokens,
     record_tool,
     update_turn_synthesis,
     get_all_turns,

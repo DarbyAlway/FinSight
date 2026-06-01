@@ -226,8 +226,8 @@ def process_turn(
                  plan_tokens if not _is_conversational(user_input) else 0, synth_tokens, total_tokens)
     logging.info("[timing] total turn: %.2fs", time.time() - t0)
 
-    # Save synthesis output and total duration
-    update_turn_synthesis(turn_id=turn_id, synthesis_output=answer, total_duration_ms=round((time.time() - t0) * 1000))
+    # Save synthesis output, total duration and total tokens
+    update_turn_synthesis(turn_id=turn_id, synthesis_output=answer, total_duration_ms=round((time.time() - t0) * 1000), total_tokens=total_tokens)
 
     updated_messages = messages + [
         {"role": "user", "content": user_input},

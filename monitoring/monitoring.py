@@ -137,6 +137,16 @@ def record_tool(agent_id: int, tool_name: str, duration_ms: float = None,
         finally:
             conn.close()
 
+def update_agent_tokens(agent_id: int, tokens: int):
+    """Update an agent record with its token usage."""
+    with _lock:
+        conn = _get_connection()
+        try:
+            conn.execute("UPDATE agents SET tokens = ? WHERE id = ?", (tokens, agent_id))
+            conn.commit()
+        finally:
+            conn.close()
+
 def update_agent_output(agent_id: int, output: str, duration_ms: float | None = None):
     """Update an agent record with its final output and duration."""
     with _lock:
@@ -150,14 +160,14 @@ def update_agent_output(agent_id: int, output: str, duration_ms: float | None = 
         finally:
             conn.close()
 
-def update_turn_synthesis(turn_id: int, synthesis_output: str, total_duration_ms: float | None = None):
-    """Update a turn with synthesis output and total duration."""
+def update_turn_synthesis(turn_id: int, synthesis_output: str, total_duration_ms: float | None = None, total_tokens: int | None = None):
+    """Update a turn with synthesis output, total duration, and total tokens."""
     with _lock:
         conn = _get_connection()
         try:
             conn.execute(
-                "UPDATE turns SET synthesis_output = ?, total_duration_ms = ? WHERE id = ?",
-                (synthesis_output, total_duration_ms, turn_id)
+                "UPDATE turns SET synthesis_output = ?, total_duration_ms = ?, total_tokens = ? WHERE id = ?",
+                (synthesis_output, total_duration_ms, total_tokens, turn_id)
             )
             conn.commit()
         finally:
