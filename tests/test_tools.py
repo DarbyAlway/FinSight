@@ -875,14 +875,18 @@ def test_web_search_with_sources_returns_empty_on_exception():
 # tools/llm tests
 # ---------------------------------------------------------------------------
 
-def test_get_client_raises_when_no_api_key():
+def test_get_client_falls_back_to_ollama_when_no_api_key():
     import tools.llm as llm_module
-    from unittest.mock import patch
-    import pytest
+    from unittest.mock import patch, MagicMock
     llm_module._client = None
-    with patch("tools.llm.os.getenv", return_value=None):
-        with pytest.raises(RuntimeError, match="LLM_API_KEY not set"):
-            llm_module._get_client()
+    with patch("tools.llm.os.getenv", return_value=None), \
+         patch("tools.llm.OpenAI") as mock_openai_cls:
+        mock_openai_cls.return_value = MagicMock()
+        client = llm_module._get_client()
+    assert client is not None
+    # Verify it used the Ollama base URL
+    call_kwargs = mock_openai_cls.call_args[1]
+    assert "localhost" in call_kwargs.get("base_url", "")
     llm_module._client = None
 
 
@@ -892,9 +896,12 @@ def test_llm_chat_returns_string():
     llm_module._client = None
     mock_response = MagicMock()
     mock_response.choices[0].message.content = "mocked answer"
+    mock_response.usage.prompt_tokens = 10
+    mock_response.usage.completion_tokens = 5
     with patch("tools.llm.os.getenv", return_value="fake-key"), \
          patch("tools.llm.OpenAI") as mock_openai_cls:
         mock_openai_cls.return_value.chat.completions.create.return_value = mock_response
-        result = llm_module.llm_chat("test-model", [{"role": "user", "content": "hi"}])
+        result, tokens = llm_module.llm_chat("test-model", [{"role": "user", "content": "hi"}])
     assert result == "mocked answer"
+    assert tokens == 15
     llm_module._client = None
