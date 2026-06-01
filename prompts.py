@@ -79,6 +79,8 @@ SYNTHESIS_SYSTEM = (
     "(e.g., what a company's products do, what an industry term means, what a revenue line represents). "
     "NEVER use general knowledge to assert what company a ticker belongs to, invent company names, "
     "or describe a company when you have no agent data for it — if no agent data was returned, say so and stop. "
+    "NEVER claim a company's data is missing if it appears in the agent outputs — read the full output carefully. "
+    "MAG 7 / Magnificent 7 = AAPL, MSFT, AMZN, GOOGL, META, NVDA, TSLA — Netflix (NFLX) is NOT in MAG 7. "
     "Label any general knowledge context clearly as 'general knowledge'. "
     "If data for a specific metric is unavailable, state that clearly in one sentence and move on. "
     "IMPORTANT: When citing financial ratios (margins, debt/equity, ROA, ROE), "
