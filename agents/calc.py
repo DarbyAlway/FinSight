@@ -72,7 +72,18 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
     messages.append({"role": "user", "content": user_question})
 
     client = _get_client()
-    response = client.chat.completions.create(
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+
+    def _chat(*args, **kwargs):
+        nonlocal total_prompt_tokens, total_completion_tokens
+        r = client.chat.completions.create(*args, **kwargs)
+        if r.usage:
+            total_prompt_tokens += r.usage.prompt_tokens
+            total_completion_tokens += r.usage.completion_tokens
+        return r
+
+    response = _chat(
         model=MODEL_AGENT,
         messages=messages,
         tools=TOOLS,
@@ -108,7 +119,7 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
             logging.info("[CalcAgent] %s(%s)", name, args)
             if agent_id is not None:
                 record_tool(agent_id=agent_id, tool_name=name, duration_ms=_dur, arguments=args, error=_err)
-        response = client.chat.completions.create(
+        response = _chat(
             model=MODEL_AGENT,
             messages=messages,
             tools=TOOLS,
@@ -116,4 +127,6 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
         )
         msg = response.choices[0].message
 
+    logging.info("[CalcAgent] tokens: prompt=%d completion=%d total=%d",
+                 total_prompt_tokens, total_completion_tokens, total_prompt_tokens + total_completion_tokens)
     return msg.content or ""

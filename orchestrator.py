@@ -117,11 +117,12 @@ def process_turn(
     t0 = time.time()
     tickers: list[str] = []
     orchestrator_plan_text = ""
+    plan_tokens = 0
     if _is_conversational(user_input):
         agents_to_run = []
         logging.info("[Orchestrator] conversational — no agents called")
     else:
-        plan_content = llm_chat(MODEL_PLAN, planning_messages, temperature=0.0)
+        plan_content, plan_tokens = llm_chat(MODEL_PLAN, planning_messages, temperature=0.0)
         orchestrator_plan_text = plan_content
         logging.info("[timing] plan call: %.2fs", time.time() - t0)
         try:
@@ -202,7 +203,7 @@ def process_turn(
 
     t2 = time.time()
     logging.info("[Synthesis] model=%s agents_context=%d chars", MODEL_SYNTHESIS, len(accumulated_context))
-    answer = llm_chat(MODEL_SYNTHESIS, synthesis_messages, temperature=0.3)
+    answer, synth_tokens = llm_chat(MODEL_SYNTHESIS, synthesis_messages, temperature=0.3)
     logging.info("[Synthesis] output preview: %s", answer[:120].replace("\n", " "))
     if agents_to_run and is_uncertain(answer, threshold=0.85):
         snippets, urls = _web_search_with_sources(user_input)
@@ -211,12 +212,18 @@ def process_turn(
                 "role": "user",
                 "content": f"Web search results:\n{snippets}\n\nUse these to answer the question.",
             }]
-            answer = llm_chat(MODEL_SYNTHESIS, web_messages, temperature=0.3) or answer
+            fallback_answer, fallback_tokens = llm_chat(MODEL_SYNTHESIS, web_messages, temperature=0.3)
+            answer = fallback_answer or answer
+            synth_tokens += fallback_tokens
             logging.info("[Synthesis] web-fallback output preview: %s", answer[:120].replace("\n", " "))
             if urls:
                 answer += "\n\n**Web sources:**\n" + "\n".join(f"- {url}" for url in urls)
             logging.info("[Orchestrator] Tavily fallback used (%d sources)", len(urls))
     logging.info("[timing] synthesis call: %.2fs", time.time() - t2)
+
+    total_tokens = plan_tokens + synth_tokens if not _is_conversational(user_input) else synth_tokens
+    logging.info("[tokens] plan=%d synthesis=%d total=%d",
+                 plan_tokens if not _is_conversational(user_input) else 0, synth_tokens, total_tokens)
     logging.info("[timing] total turn: %.2fs", time.time() - t0)
 
     # Save synthesis output and total duration

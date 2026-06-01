@@ -118,7 +118,7 @@ TOOL_FUNCTIONS = {
 OPT = {"temperature": 0.1}
 
 
-def run(user_question: str, context: str = "", history: list[dict] | None = None, agent_id: int | None = None) -> str:
+def run(user_question: str, context: str = "", history: list[dict] | None = None, agent_id: int | None = None, expected_tickers: list[str] | None = None) -> str:
     messages = [{"role": "system", "content": RATIOS_SYSTEM}]
     if history:
         messages += history[-6:]
@@ -130,7 +130,18 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
     messages.append({"role": "user", "content": user_question})
 
     client = _get_client()
-    response = client.chat.completions.create(
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+
+    def _chat(*args, **kwargs):
+        nonlocal total_prompt_tokens, total_completion_tokens
+        r = client.chat.completions.create(*args, **kwargs)
+        if r.usage:
+            total_prompt_tokens += r.usage.prompt_tokens
+            total_completion_tokens += r.usage.completion_tokens
+        return r
+
+    response = _chat(
         model=MODEL_AGENT,
         messages=messages,
         tools=TOOLS,
@@ -166,7 +177,7 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
             logging.info("[RatiosAgent] %s(%s)", name, args)
             if agent_id is not None:
                 record_tool(agent_id=agent_id, tool_name=name, duration_ms=_dur, arguments=args, error=_err)
-        response = client.chat.completions.create(
+        response = _chat(
             model=MODEL_AGENT,
             messages=messages,
             tools=TOOLS,
@@ -174,4 +185,23 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
         )
         msg = response.choices[0].message
 
-    return msg.content or ""
+    summary = msg.content or ""
+    logging.info("[RatiosAgent] tokens: prompt=%d completion=%d total=%d",
+                 total_prompt_tokens, total_completion_tokens, total_prompt_tokens + total_completion_tokens)
+
+    if expected_tickers:
+        missing = [t for t in expected_tickers if t not in summary]
+        if missing:
+            logging.info("[RatiosAgent] self-critique: missing %s — requesting completion", missing)
+            messages.append({"role": "assistant", "content": summary})
+            messages.append({"role": "user", "content": f"Your response is missing data for: {', '.join(missing)}. Return ONLY the ## TICKER sections for these missing tickers — do not repeat tickers already covered."})
+            fix_response = _chat(
+                model=MODEL_AGENT,
+                messages=messages,
+                tools=TOOLS,
+                temperature=OPT["temperature"],
+            )
+            if fix_response.choices[0].message.content:
+                summary += "\n\n" + fix_response.choices[0].message.content
+
+    return summary
