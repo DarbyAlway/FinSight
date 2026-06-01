@@ -187,16 +187,18 @@ def process_turn(
 
     synthesis_system = synth_sys
     synthesis_messages = [{"role": "system", "content": synthesis_system}, *messages]
-    synthesis_messages.append({"role": "user", "content": user_input})
     if accumulated_context:
         synthesis_messages.append({
             "role": "user",
             "content": (
+                f"Question: {user_input}\n\n"
                 f"Agent outputs:\n{accumulated_context}\n\n"
-                "Based ONLY on the above agent outputs, answer the user's question. "
+                "Answer the question above using ONLY the agent outputs. "
                 "Quote specific figures directly from the outputs."
             ),
         })
+    else:
+        synthesis_messages.append({"role": "user", "content": user_input})
 
     t2 = time.time()
     logging.info("[Synthesis] model=%s agents_context=%d chars", MODEL_SYNTHESIS, len(accumulated_context))
