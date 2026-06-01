@@ -118,19 +118,7 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
 
     raw_results: list[str] = []
 
-    while msg.tool_calls:
-        messages.append({
-            "role": "assistant",
-            "content": msg.content or "",
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-                }
-                for tc in msg.tool_calls
-            ],
-        })
+    if msg.tool_calls:
         for tool_call in msg.tool_calls:
             name = tool_call.function.name
             args = json.loads(tool_call.function.arguments)
@@ -141,21 +129,9 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
                 result = result[:3000] + "\n... [truncated]"
             _dur = round((time.perf_counter() - _t) * 1000)
             _err = result[:120] if isinstance(result, str) and result.startswith("TOOL_ERROR") else None
-            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
             raw_results.append(f"[{name}({args})]\n{result}")
             logging.info("[FinancialsAgent] %s(%s)", name, args)
             if agent_id is not None:
                 record_tool(agent_id=agent_id, tool_name=name, duration_ms=_dur, arguments=args, error=_err)
-        response = client.chat.completions.create(
-            model=MODEL_AGENT,
-            messages=messages,
-            tools=TOOLS,
-            temperature=OPT["temperature"],
-        )
-        msg = response.choices[0].message
 
-    # Return raw tool results directly to avoid LLM mixing up data across tickers.
-    # Synthesis is responsible for reasoning; agent is responsible for accurate data retrieval.
-    if raw_results:
-        return "\n\n---\n\n".join(raw_results)
-    return msg.content or ""
+    return "\n\n---\n\n".join(raw_results) if raw_results else msg.content or ""
