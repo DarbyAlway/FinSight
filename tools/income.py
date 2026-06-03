@@ -12,9 +12,11 @@ from tools.db import (
 
 def _unit_multiplier(raw: str) -> float:
     lower = raw.lower()
-    if 'in thousands' in lower:
+    # Match "(in thousands" only when the whole statement is in thousands.
+    # Avoid false positive on "(in millions, except shares in thousands...)".
+    if re.search(r'\(in thousands', lower):
         return 0.001
-    if 'in billions' in lower:
+    if re.search(r'\(in billions', lower):
         return 1000.0
     return 1.0  # default: already in millions
 
@@ -81,36 +83,51 @@ def parse_income_statement(ticker: str, raw: str) -> list[dict]:
 
 
 def parse_quarterly_statement(ticker: str, raw: str, period_end: str) -> list[dict]:
-    """Parse a 10-Q income statement, extracting only 'Three Months Ended' columns."""
+    """Parse a 10-Q income statement, extracting only single-quarter columns."""
     rows = []
     now = time.time()
     date_re = re.compile(r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+,\s+\d{4})')
+    # Matches dates with explicit quarter labels: "Oct 31, 2025 (Q3)" or "(YTD)"
+    date_label_re = re.compile(
+        r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d+,\s+\d{4})\s*\(([^)]+)\)'
+    )
     dollar_re = re.compile(r'\$(\([\d,]+\)|[\d,]+)')
     lines = raw.split('\n')
 
     quarterly_dates = []
     ytd_count = 0
-    pending_period = None
 
+    # Method 1: detect edgartools labeled columns like "(Q3)" and "(YTD)"
     for line in lines:
-        lower = line.lower()
-        if 'three months' in lower:
-            pending_period = 'quarterly'
-        elif 'six months' in lower or 'nine months' in lower:
-            pending_period = 'ytd'
+        labeled = date_label_re.findall(line)
+        if labeled:
+            q_dates = [d for d, lbl in labeled if re.match(r'Q\d', lbl, re.I)]
+            ytd_n = sum(1 for _, lbl in labeled if 'YTD' in lbl.upper())
+            if q_dates:
+                quarterly_dates = q_dates
+                ytd_count = ytd_n
+                break
 
-        dates = date_re.findall(line)
-        if not dates:
-            continue
+    # Method 2: detect "Three Months Ended" / "Six/Nine Months Ended" text headers
+    if not quarterly_dates:
+        pending_period = None
+        for line in lines:
+            lower = line.lower()
+            if 'three months' in lower:
+                pending_period = 'quarterly'
+            elif 'six months' in lower or 'nine months' in lower:
+                pending_period = 'ytd'
+            dates = date_re.findall(line)
+            if not dates:
+                continue
+            if pending_period == 'quarterly' and not quarterly_dates:
+                quarterly_dates = dates
+                pending_period = None
+            elif pending_period == 'ytd' and ytd_count == 0:
+                ytd_count = len(dates)
+                pending_period = None
 
-        if pending_period == 'quarterly' and not quarterly_dates:
-            quarterly_dates = dates
-            pending_period = None
-        elif pending_period == 'ytd' and ytd_count == 0:
-            ytd_count = len(dates)
-            pending_period = None
-
-    # Fallback: no explicit period header — take dates from the densest header line
+    # Method 3: fallback — use all dates from densest header line
     if not quarterly_dates:
         best = []
         for line in lines:

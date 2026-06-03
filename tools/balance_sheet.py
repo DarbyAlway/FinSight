@@ -9,9 +9,9 @@ from tools.db import is_balance_sheet_fresh, save_balance_sheet, load_balance_sh
 
 def _unit_multiplier(raw: str) -> float:
     lower = raw.lower()
-    if 'in thousands' in lower:
+    if re.search(r'\(in thousands', lower):
         return 0.001
-    if 'in billions' in lower:
+    if re.search(r'\(in billions', lower):
         return 1000.0
     return 1.0
 

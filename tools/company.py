@@ -29,9 +29,13 @@ def fetch_and_cache_company(symbol: str) -> dict | None:
 
 
 def get_company_info(symbol: str) -> str:
-    if not is_ticker_info_fresh(symbol): # check that the symbol are in cache database or not
+    if not is_ticker_info_fresh(symbol):
         fetch_and_cache_company(symbol)
     info = load_ticker_info(symbol)
+    # Re-fetch if price data is missing (corrupted or incomplete cache entry)
+    if not info or not info.get('currentPrice'):
+        fetch_and_cache_company(symbol)
+        info = load_ticker_info(symbol)
     if not info:
         return f"No company info found for {symbol}."
     cached_at = info.get("_cached_at")
