@@ -4,6 +4,7 @@ import logging
 
 from langfuse import observe
 from tools.llm import _get_client
+from agents._tooling import execute_tool
 from tools.config import MODEL_AGENT
 from tools.news import get_stock_news, search_news
 from prompts import NEWS_SYSTEM as SYSTEM_PROMPT
@@ -101,15 +102,8 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
             name = tool_call.function.name
             args = json.loads(tool_call.function.arguments)
             fn = TOOL_FUNCTIONS.get(name)
-            _t = time.perf_counter()
-            result = fn(**args) if fn else f"Unknown tool: {name}"
-            if isinstance(result, str) and len(result) > 3000:
-                result = result[:3000] + "\n... [truncated]"
-            _dur = round((time.perf_counter() - _t) * 1000)
-            _err = result[:120] if isinstance(result, str) and result.startswith("TOOL_ERROR") else None
+            result = execute_tool("NewsAgent", name, args, fn)
             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
-            _preview = (result if isinstance(result, str) else str(result)).replace("\n", " ")[:300]
-            logging.info("[NewsAgent] %s(%s) → %dms\n  ↳ %s", name, args, _dur, _preview)
         response = _chat(
             model=MODEL_AGENT,
             messages=messages,
