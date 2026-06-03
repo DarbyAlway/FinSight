@@ -16,7 +16,7 @@ SYNONYMS = {
     "eps":              ["%earnings per share%", "%diluted%"],
 }
 
-MODEL = "qwen2.5:14b"             # default
-MODEL_AGENT = "qwen2.5:14b"      # agents — no thinking mode, reliable tool calling
-MODEL_PLAN = "qwen3:30b-a3b"     # planner — smarter ticker resolution (add /no_think prefix)
-MODEL_SYNTHESIS = "qwen3:14b"    # synthesis — good reasoning, faster than 30b
+MODEL = "gpt-oss-120b"
+MODEL_AGENT = "gpt-oss-120b"                      # agents — $0.22/$0.59 per M, tool calling confirmed
+MODEL_PLAN = "Meta-Llama-3.3-70B-Instruct"       # planner — reliable JSON
+MODEL_SYNTHESIS = "Meta-Llama-3.3-70B-Instruct"  # synthesis — reliable long-form

@@ -4,6 +4,7 @@ import time
 
 from langfuse.openai import OpenAI
 
+_SAMBANOVA_BASE_URL = "https://api.sambanova.ai/v1"
 _OLLAMA_BASE_URL = "http://localhost:11434/v1"
 _client: OpenAI | None = None
 
@@ -11,8 +12,16 @@ _client: OpenAI | None = None
 def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        base_url = os.getenv("LLM_BASE_URL") or _OLLAMA_BASE_URL
-        api_key = "not-needed" if "localhost" in base_url else os.getenv("LLM_API_KEY", "not-needed")
+        base_url = os.getenv("LLM_BASE_URL") or (
+            _SAMBANOVA_BASE_URL if os.getenv("SAMBANOVA_API_KEY")
+            else _OLLAMA_BASE_URL
+        )
+        if "sambanova" in base_url:
+            api_key = os.getenv("SAMBANOVA_API_KEY")
+        elif "localhost" in base_url:
+            api_key = "not-needed"
+        else:
+            api_key = os.getenv("LLM_API_KEY", "not-needed")
         _client = OpenAI(api_key=api_key, base_url=base_url)
         logging.info("LLM client: %s", base_url)
     return _client
