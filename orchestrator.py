@@ -57,36 +57,9 @@ def _parse_plan(content: str) -> dict:
     return parsed
 
 
-_FINANCIAL_KEYWORDS = {
-    "revenue", "income", "earnings", "profit", "loss", "sales", "margin",
-    "cagr", "dcf", "peg", "valuation", "p/e", "pe ratio", "eps",
-    "news", "headline", "article", "filing", "10-k", "10-q",
-    "stock", "share", "price", "dividend", "sector", "analyst",
-    "correlation", "rank", "compare", "quarterly", "annual",
-    "debt", "equity", "roa", "roe", "balance sheet",
-    "cash", "burn", "runway", "liquidity", "free cash flow", "fcf",
-    "cash flow", "operating cash", "capex", "interest coverage",
-    "current ratio", "price target", "target price",
-    "guidance", "outlook", "forecast", "beat", "miss", "report", "trend",
-    # Thai financial keywords
-    "รายได้", "กำไร", "หุ้น", "งบการเงิน", "ราคา", "ปันผล", "ข่าว", "นักวิเคราะห์", "ตลาด",
-}
-
-import re as _re
-_TICKER_RE = _re.compile(r'\b[A-Z]{1,5}\b')
-
 def _is_time_sensitive(question: str) -> bool:
     q = question.lower()
     return any(kw in q for kw in TIME_SENSITIVE_KEYWORDS)
-
-
-def _is_conversational(question: str) -> bool: # check if it is a normal conversation or not
-    q = question.lower()
-    if any(kw in q for kw in _FINANCIAL_KEYWORDS): # check if its contain a financial keyword or not
-        return False
-    if _TICKER_RE.search(question): # check if its a ticker pattern
-        return False
-    return True
 
 
 def _keyword_fallback(question: str) -> list[str]:
@@ -128,25 +101,22 @@ def process_turn(
     ]
     t0 = time.time()
     tickers: list[str] = []
-    orchestrator_plan_text = ""
-    plan_tokens = 0
-    if _is_conversational(user_input):
-        agents_to_run = []
-        logging.info("[Orchestrator] conversational — no agents called")
-    else:
-        plan_content, plan_tokens = _plan_step(planning_messages)
-        orchestrator_plan_text = plan_content
-        logging.info("[timing] plan call: %.2fs", time.time() - t0)
-        try:
-            plan = _parse_plan(plan_content)
-            agents_to_run: list[str] = plan.get("agents", [])
-            tickers = plan.get("tickers", [])
-            reason = plan.get("reason", "")
-            logging.info("[Orchestrator] plan → agents=%s  tickers=%s  reason=%s", agents_to_run, tickers, reason)
-        except (json.JSONDecodeError, ValueError):
-            logging.warning("[Orchestrator] plan JSON malformed — using keyword fallback")
-            agents_to_run = _keyword_fallback(user_input)
-            logging.info("[Orchestrator] keyword fallback → agents=%s", agents_to_run)
+    # Always let the planner LLM classify chat vs. financial — it returns
+    # agents=[] for greetings and agents=[...] for real requests. (Replaces a
+    # brittle keyword heuristic that misread "analyze rocket lab" as chitchat.)
+    plan_content, plan_tokens = _plan_step(planning_messages)
+    orchestrator_plan_text = plan_content
+    logging.info("[timing] plan call: %.2fs", time.time() - t0)
+    try:
+        plan = _parse_plan(plan_content)
+        agents_to_run: list[str] = plan.get("agents", [])
+        tickers = plan.get("tickers", [])
+        reason = plan.get("reason", "")
+        logging.info("[Orchestrator] plan → agents=%s  tickers=%s  reason=%s", agents_to_run, tickers, reason)
+    except (json.JSONDecodeError, ValueError):
+        logging.warning("[Orchestrator] plan JSON malformed — using keyword fallback")
+        agents_to_run = _keyword_fallback(user_input)
+        logging.info("[Orchestrator] keyword fallback → agents=%s", agents_to_run)
 
     accumulated_context = ""
     agent_map = {

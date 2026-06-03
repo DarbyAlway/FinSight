@@ -147,11 +147,12 @@ def test_tavily_fallback_skipped_when_confident():
 
     confident_answer = "AAPL P/E ratio is 28x based on trailing twelve months."
 
+    plan = json.dumps({"agents": ["financials"], "tickers": ["AAPL"]})
     mock_search = MagicMock()
-    with patch("orchestrator._is_conversational", return_value=True), \
-         patch("orchestrator.is_uncertain", return_value=False), \
+    with patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator._web_search_with_sources", mock_search), \
-         patch("orchestrator.llm_chat", return_value=(confident_answer, 0)):
+         patch("orchestrator.run_financials", return_value=("AAPL P/E: 28x", 0)), \
+         patch("orchestrator.llm_chat", side_effect=[(plan, 0), (confident_answer, 0)]):
         result, _ = process_turn("What is AAPL P/E?", [])
 
     mock_search.assert_not_called()
@@ -163,10 +164,11 @@ def test_tavily_fallback_skipped_when_empty_results():
 
     uncertain_answer = "I'm not certain about that."
 
-    with patch("orchestrator._is_conversational", return_value=True), \
-         patch("orchestrator.is_uncertain", return_value=True), \
+    plan = json.dumps({"agents": ["financials"], "tickers": ["AAPL"]})
+    with patch("orchestrator.is_uncertain", return_value=True), \
          patch("orchestrator._web_search_with_sources", return_value=("", [])), \
-         patch("orchestrator.llm_chat", return_value=(uncertain_answer, 0)):
+         patch("orchestrator.run_financials", return_value=("AAPL revenue: $391B", 0)), \
+         patch("orchestrator.llm_chat", side_effect=[(plan, 0), (uncertain_answer, 0)]):
         result, _ = process_turn("What is AAPL revenue?", [])
 
     assert result == uncertain_answer
