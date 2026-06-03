@@ -6,6 +6,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 
+from langfuse import observe
+
 import ollama
 
 _FAILURE_LOG = os.path.join(os.path.dirname(__file__), "tests", "failure_log.jsonl")
@@ -99,6 +101,7 @@ def _keyword_fallback(question: str) -> list[str]:
     return ["financials"]
 
 
+@observe(name="process_turn")
 def process_turn(
     user_input: str,
     messages: list[dict],

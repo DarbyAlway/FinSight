@@ -1,0 +1,53 @@
+name: finalyze
+
+services:
+
+  # ── Vector store ────────────────────────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: finalyze-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  # ── Langfuse database ────────────────────────────────────────────────────────
+  langfuse-db:
+    image: postgres:15-alpine
+    container_name: finalyze-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: langfuse
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse_secret
+    volumes:
+      - langfuse_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Langfuse dashboard ───────────────────────────────────────────────────────
+  langfuse:
+    image: langfuse/langfuse:2
+    container_name: finalyze-langfuse
+    restart: unless-stopped
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse_secret@langfuse-db:5432/langfuse
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: supersecretkey_change_me_in_prod
+      SALT: saltsaltsalt_change_me_in_prod
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+
+volumes:
+  qdrant_data:
+  langfuse_db_data:

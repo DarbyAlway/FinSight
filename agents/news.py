@@ -2,6 +2,7 @@ import json
 import time
 import logging
 
+from langfuse import observe
 from tools.llm import _get_client
 from monitoring import record_tool, update_agent_tokens
 from tools.config import MODEL_AGENT
@@ -51,6 +52,7 @@ TOOL_FUNCTIONS = {
 OPT = {"temperature": 0.1}
 
 
+@observe(name="news-agent")
 def run(user_question: str, context: str = "", history: list[dict] | None = None, agent_id: int | None = None) -> str:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if history:
