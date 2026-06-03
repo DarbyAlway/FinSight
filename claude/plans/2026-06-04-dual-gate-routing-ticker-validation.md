@@ -176,15 +176,49 @@ Bad tickers are caught **before** agent dispatch, so we never spend 3 agents fet
 
 ---
 
+## Available tools — USE THESE, don't hardcode (verified 2026-06-04 in `stock` env)
+
+| Need | Use this (already installed) | Notes |
+|---|---|---|
+| **Name→ticker resolution (Gate 2)** | **`edgar.get_company_tickers()`** | Returns **10,769 rows** `[cik, ticker, exchange, company]` — the authoritative SEC list, **no download**. Build an in-memory `name→ticker` + `valid-ticker` dict from it at startup. **This makes the full index ≈ free — skip the "lightweight backstop only" compromise.** |
+| also | `edgar.find_company(name)`, `edgar.get_ticker_to_cik_lookup()` | edgartools name search + ticker↔CIK |
+| secondary / dynamic-path fallback | `yfinance.Search`, `yfinance.Lookup` (yf 1.3.0) | name→ticker search for the rare dynamic path |
+| **Structured output (router)** | `openai` 2.40 native `response_format` (json_schema) + `pydantic` 2.13 | `instructor` is **NOT** installed → `pip install instructor` *only if* SambaNova doesn't support native `response_format`. Verify SambaNova first. |
+| **Embedding intent classifier** (optional, avoids an LLM router call) | **`fastembed` 0.8.0** | Already used by Qdrant — reuse the same embedder for cheap structural intent classification |
+| **LangGraph orchestration** (later phase) | `langgraph` — **NOT installed** | `pip install langgraph` when we build the state-machine router |
+| Tracing | `langfuse` 4.7.0 ✓ | already wired |
+
+**Impact on the plan:** Gate 2 is no longer a "build a parser / hardcode" task — it's "load `get_company_tickers()` into a dict." So implement the **full authoritative index** (not the lightweight backstop) — it's one function call and removes the coin-flip entirely. Group manifest (Gate 1) stays a small hardcoded dict (MAG7/FAANG aren't SEC-defined groups).
+
 ## Open questions to verify next session
 - Does **SambaNova** support structured outputs (`response_format` json-schema)? If not → `instructor` or JSON-mode fallback.
 - Does **edgartools** expose `get_company_tickers()` (SEC `company_tickers.json`)? If not → download + cache the JSON directly.
 - Foreign/ADR names (e.g., Alibaba) and share-class ambiguity (GOOGL vs GOOG) — confirm the SEC index + normalization handle these.
+
+## Additional issues observed 2026-06-04 (fold into next session)
+
+### I1 — Slow responses (LITE/Lumentum query took 102s) — DIAGNOSE FIRST
+Tool executions were fast (cash-flow fetch ~6s, FCF calc 22ms, edgar init ~10s one-time) but the **financials agent took 50.75s and calc took 99.57s**. The time is in the agents' **internal LLM calls**, which use the `_chat` wrapper that does **not log latency** (only `llm_chat` does) — so it's invisible.
+- **Action: add latency logging to the agents' `_chat` wrapper** (model, prompt/completion tokens, latency) + log any `429`/rate-limit. Without this we're guessing.
+- **Prime suspects:** (1) **SambaNova throttling** under parallel agent load — 2-3 agents fire concurrent requests via ThreadPoolExecutor → RPM limit → silent client ret/backoff; (2) **calc-depends-on-financials run in parallel** (see I2). 50–99s/agent for 2 LLM calls is abnormal (normal SambaNova call ≈1–2s).
+- Possible fixes once diagnosed: limit agent concurrency / add a small rate-limit-aware semaphore; or sequence dependent agents (financials before calc).
+
+### I2 — Cross-agent data dependency run in parallel (correctness + speed)
+`calc.calculate_free_cash_flow` and the ratios margin calcs need data that the **financials** agent fetches, but agents run **concurrently** → race. Fallout in the LITE run: calc reported FCF **+$25M/+$126M ("capex not found")** while synthesis said **−$105M/−$108M** — a contradiction + a **capex-parsing bug** (capex not found in the cash-flow statement). 
+- Fix options: (a) make each agent self-sufficient (fetch its own inputs — same principle as the ratios `get_income_statement` fix), or (b) introduce dependency ordering (calc/ratios run after financials). Self-sufficiency is more parallel-friendly.
+- Also fix the **capex parser** (`calculate_free_cash_flow` "capex not found") — separate data-quality bug.
+
+### I3 — Orchestrator picks wrong agent (doesn't know which agent owns which tools)
+The planner routes by a high-level agent description but doesn't know each agent's exact tool inventory, so it sometimes mis-routes.
+- **Fix:** in `PLAN_SYSTEM` (or the new router's intent prompt), enumerate **each agent's concrete tools/capabilities** explicitly so routing maps capability→agent precisely. The structured router (Phase D) is the natural home for this — encode the agent→tools map and let the router pick by capability.
+
+### I4 — Summarize prior turns to cut token cost (history accumulation)
+Conversation history is fed into agents (`history[-6:]`) and full into synthesis, so tokens grow every turn (the SNOW run jumped 17.5k→20k from one prior turn). 
+- **Fix:** (a) stop feeding raw history to data-fetch agents (they rarely need it), and/or (b) **summarize previous turns** into a short running summary instead of passing full prior responses. Reduces per-turn token cost, especially in long sessions.
 
 ## Connection to LangGraph migration
 This router *is* the LangGraph entry node. `orchestrator_router_node` → conditional edges → agent nodes. Implementing the dual-gate router is the first concrete step of the LangGraph migration we brainstormed (re-planning / decomposition is the later phase, built on this stable base).
 
 ## Out of scope (later)
 - Query decomposition / self-generated sub-questions (the LangGraph re-planning headline feature).
-- Stop feeding conversation history to data-fetch agents (separate token optimization, ~2.5k/query).
 - Improving the Tavily trigger (fire on empty agent outputs vs text-scoring).
