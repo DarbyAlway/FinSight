@@ -94,19 +94,26 @@ def parse_quarterly_statement(ticker: str, raw: str, period_end: str) -> list[di
     dollar_re = re.compile(r'\$(\([\d,]+\)|[\d,]+)')
     lines = raw.split('\n')
 
-    quarterly_dates = []
+    quarterly_dates: list[str] = []
+    quarter_labels: list[str] = []
     ytd_count = 0
 
     # Method 1: detect edgartools labeled columns like "(Q3)" and "(YTD)"
+    # Use the line with the MOST Q-labeled dates (column header, not title line)
+    best_q_items: list[tuple[str, str]] = []
+    best_ytd_count = 0
     for line in lines:
         labeled = date_label_re.findall(line)
         if labeled:
-            q_dates = [d for d, lbl in labeled if re.match(r'Q\d', lbl, re.I)]
+            q_items = [(d, lbl) for d, lbl in labeled if re.match(r'Q\d', lbl, re.I)]
             ytd_n = sum(1 for _, lbl in labeled if 'YTD' in lbl.upper())
-            if q_dates:
-                quarterly_dates = q_dates
-                ytd_count = ytd_n
-                break
+            if len(q_items) >= len(best_q_items):
+                best_q_items = q_items
+                best_ytd_count = ytd_n
+    if best_q_items:
+        quarterly_dates = [d for d, _ in best_q_items]
+        quarter_labels = [lbl for _, lbl in best_q_items]
+        ytd_count = best_ytd_count
 
     # Method 2: detect "Three Months Ended" / "Six/Nine Months Ended" text headers
     if not quarterly_dates:
@@ -172,6 +179,7 @@ def parse_quarterly_statement(ticker: str, raw: str, period_end: str) -> list[di
         for i, date in enumerate(quarterly_dates):
             rows.append({
                 "ticker": ticker, "period_end": date,
+                "quarter_label": quarter_labels[i] if i < len(quarter_labels) else "",
                 "section": current_section, "line_item": name,
                 "value": values[i], "fetched_at": now,
             })

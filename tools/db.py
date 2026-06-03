@@ -28,6 +28,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS quarterly_statements (
                 ticker        VARCHAR,
                 period_end    VARCHAR,
+                quarter_label VARCHAR,
                 section       VARCHAR,
                 line_item     VARCHAR,
                 value         DOUBLE,
@@ -35,6 +36,10 @@ def init_db():
                 PRIMARY KEY (ticker, period_end, section, line_item)
             )
         """)
+        try:
+            con.execute("ALTER TABLE quarterly_statements ADD COLUMN quarter_label VARCHAR DEFAULT ''")
+        except Exception:
+            pass  # column already exists
         con.execute("""
             CREATE TABLE IF NOT EXISTS ticker_info (
                 symbol          VARCHAR PRIMARY KEY,
@@ -223,9 +228,9 @@ def save_quarterly_cache(rows: list[dict]):
     with duckdb.connect(DB_PATH) as con:
         con.executemany(
             """INSERT OR REPLACE INTO quarterly_statements
-               (ticker, period_end, section, line_item, value, fetched_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            [(r["ticker"], r["period_end"], r["section"],
+               (ticker, period_end, quarter_label, section, line_item, value, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            [(r["ticker"], r["period_end"], r.get("quarter_label", ""), r["section"],
               r["line_item"], r["value"], r["fetched_at"]) for r in rows],
         )
 
@@ -233,18 +238,19 @@ def save_quarterly_cache(rows: list[dict]):
 def load_quarterly_cache(ticker: str) -> str:
     with duckdb.connect(DB_PATH) as con:
         rows = con.execute(
-            "SELECT period_end, section, line_item, value FROM quarterly_statements "
+            "SELECT period_end, quarter_label, section, line_item, value FROM quarterly_statements "
             "WHERE ticker = ? ORDER BY period_end DESC, section, line_item",
             (ticker,)
         ).fetchall()
     if not rows:
         return ""
-    lines = [f"{ticker} Quarterly Income Statement (cached)"]
+    lines = [f"{ticker} Quarterly Income Statement (SEC 10-Q, single quarter only)"]
     current_period = None
     current_section = None
-    for period_end, section, line_item, value in rows:
+    for period_end, quarter_label, section, line_item, value in rows:
         if period_end != current_period:
-            lines.append(f"\n  Period ending: {period_end}")
+            label_str = f" ({quarter_label} — fiscal)" if quarter_label else ""
+            lines.append(f"\n  Period ending: {period_end}{label_str}")
             current_period = period_end
             current_section = None
         if section != current_section:
