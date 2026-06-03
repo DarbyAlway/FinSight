@@ -2,7 +2,7 @@ name: finalyze
 
 services:
 
-  # ── Vector store ────────────────────────────────────────────────────────────
+  # ── Vector store ─────────────────────────────────────────────────────────────
   qdrant:
     image: qdrant/qdrant:latest
     container_name: finalyze-qdrant
@@ -13,41 +13,172 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
-  # ── Langfuse database ────────────────────────────────────────────────────────
-  langfuse-db:
-    image: postgres:15-alpine
-    container_name: finalyze-db
+  # ── Langfuse v3 infrastructure ────────────────────────────────────────────────
+  langfuse-postgres:
+    image: postgres:16-alpine
+    container_name: finalyze-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: langfuse
       POSTGRES_USER: langfuse
       POSTGRES_PASSWORD: langfuse_secret
     volumes:
-      - langfuse_db_data:/var/lib/postgresql/data
+      - langfuse_postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U langfuse"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  # ── Langfuse dashboard ───────────────────────────────────────────────────────
-  langfuse:
-    image: langfuse/langfuse:2
+  langfuse-clickhouse:
+    image: clickhouse/clickhouse-server:24.12
+    container_name: finalyze-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse_secret
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        cat > /etc/clickhouse-server/config.d/cluster.xml << 'EOF'
+        <clickhouse>
+          <keeper_server>
+            <tcp_port>9181</tcp_port>
+            <server_id>1</server_id>
+            <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>
+            <snapshot_storage_path>/var/lib/clickhouse/coordination/snapshots</snapshot_storage_path>
+            <coordination_settings>
+              <operation_timeout_ms>10000</operation_timeout_ms>
+              <session_timeout_ms>30000</session_timeout_ms>
+              <raft_logs_level>warning</raft_logs_level>
+            </coordination_settings>
+            <raft_configuration>
+              <server><id>1</id><hostname>localhost</hostname><port>9444</port></server>
+            </raft_configuration>
+          </keeper_server>
+          <zookeeper><node><host>localhost</host><port>9181</port></node></zookeeper>
+          <remote_servers>
+            <default><shard><replica><host>localhost</host><port>9000</port></replica></shard></default>
+          </remote_servers>
+          <macros><shard>01</shard><replica>01</replica><cluster>default</cluster></macros>
+        </clickhouse>
+        EOF
+        exec /entrypoint.sh
+    volumes:
+      - langfuse_clickhouse:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  langfuse-redis:
+    image: redis:7-alpine
+    container_name: finalyze-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  langfuse-minio:
+    image: minio/minio:latest
+    container_name: finalyze-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio_access
+      MINIO_ROOT_PASSWORD: minio_secret123
+    ports:
+      - "9001:9001"
+    volumes:
+      - langfuse_minio:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  langfuse-minio-setup:
+    image: minio/mc:latest
+    container_name: finalyze-minio-setup
+    depends_on:
+      langfuse-minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://langfuse-minio:9000 minio_access minio_secret123 &&
+      mc mb local/langfuse --ignore-existing &&
+      exit 0"
+
+  # ── Langfuse v3 app ───────────────────────────────────────────────────────────
+  langfuse-web:
+    image: langfuse/langfuse:3
     container_name: finalyze-langfuse
     restart: unless-stopped
     depends_on:
-      langfuse-db:
+      langfuse-postgres:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+      langfuse-minio:
         condition: service_healthy
     ports:
       - "3000:3000"
-    environment:
-      DATABASE_URL: postgresql://langfuse:langfuse_secret@langfuse-db:5432/langfuse
+    environment: &langfuse_env
+      DATABASE_URL: postgresql://langfuse:langfuse_secret@langfuse-postgres:5432/langfuse
       NEXTAUTH_URL: http://localhost:3000
-      NEXTAUTH_SECRET: supersecretkey_change_me_in_prod
-      SALT: saltsaltsalt_change_me_in_prod
+      NEXTAUTH_SECRET: supersecretkey_change_in_prod_32c
+      SALT: saltsaltsalt_change_in_prod_salt
+      ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse_secret
+      REDIS_HOST: langfuse-redis
+      REDIS_PORT: "6379"
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio_access
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: minio_secret123
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio_access
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: minio_secret123
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_BATCH_EXPORT_BUCKET: langfuse
+      LANGFUSE_S3_BATCH_EXPORT_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_BATCH_EXPORT_REGION: us-east-1
+      LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID: minio_access
+      LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY: minio_secret123
+      LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE: "true"
       TELEMETRY_ENABLED: "false"
-      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    container_name: finalyze-langfuse-worker
+    restart: unless-stopped
+    depends_on:
+      langfuse-postgres:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+    environment: *langfuse_env
 
 volumes:
   qdrant_data:
-  langfuse_db_data:
+  langfuse_postgres:
+  langfuse_clickhouse:
+  langfuse_minio:

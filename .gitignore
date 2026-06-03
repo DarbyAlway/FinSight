@@ -8,3 +8,5 @@ logs/
 claude/memory/
 debug_10q.py
 test/
+.claude/
+.playwright-mcp/
