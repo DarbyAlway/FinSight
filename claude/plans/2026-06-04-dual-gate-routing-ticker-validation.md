@@ -195,6 +195,27 @@ Bad tickers are caught **before** agent dispatch, so we never spend 3 agents fet
 - Does **edgartools** expose `get_company_tickers()` (SEC `company_tickers.json`)? If not → download + cache the JSON directly.
 - Foreign/ADR names (e.g., Alibaba) and share-class ambiguity (GOOGL vs GOOG) — confirm the SEC index + normalization handle these.
 
+## Phase F — Data integrity: Pydantic-validated parsers (new workstream)
+
+**Principle (same as tickers): the LLM should never *type* a number.** Numbers flow through validated structured models; the LLM decides *what to fetch* and writes prose *around* the numbers — it never re-enters them.
+
+**Context:** in our architecture the **Python parsers** (`parse_income_statement`, `parse_quarterly_statement`, `parse_balance_sheet`, `parse_cash_flow`) already extract numbers from SEC text — the LLM only summarizes. Every data bug fixed manually this session was an *unvalidated parser* bug: `383` stored as millions (meant `383,000`, the unit-multiplier bug), `204.6%` gross margin, YTD figures mislabeled as single-quarter, FCF "capex not found". Pydantic validation would have caught all of them **at parse time, automatically.**
+
+10. **Define Pydantic models for each parsed statement** with sanity validators, e.g.:
+    ```python
+    class MarginRow(BaseModel):
+        fiscal_year: str
+        revenue: float = Field(gt=0)                 # revenue can't be ≤ 0
+        gross_margin_pct: float = Field(ge=-1, le=1) # >100% margin is impossible → raises
+    ```
+    Cover: income statement, quarterly, balance sheet, cash flow. Add domain constraints (margins in [-1,1], revenue > 0, assets = liabilities + equity tolerance check, capex present for FCF, etc.).
+11. **Have the parsers return `list[Model]`** instead of dicts; a bad parse **raises/flags at the source** so it's never stored in DuckDB or shown. Log + skip the bad row rather than silently corrupting.
+12. **Format for the LLM deterministically from the validated model** (don't hand the LLM free numbers to retype).
+13. **Stretch (do carefully):** have agents pass **structured data** through to synthesis instead of re-typed prose — note we tried "tool-select only, no agent summary" earlier this session and reverted it (missing-ticker problem), so this needs the dual-gate/self-critique safeguards in place first.
+14. **Later (flag, don't build yet):** post-validate the synthesis answer — assert numbers in the final prose exist in the source data — to close the last LLM-retyping gap.
+
+This is the **systematic, permanent version of the manual bug-hunting done 2026-06-04** (unit multiplier, fiscal quarters, ratios, YTD). Priority: after Phase A safety, alongside the Gate work — parser validation is independent and high-value.
+
 ## Additional issues observed 2026-06-04 (fold into next session)
 
 ### I1 — Slow responses (LITE/Lumentum query took 102s) — DIAGNOSE FIRST
