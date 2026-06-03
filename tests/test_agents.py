@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 
-def _make_openai_response(content="result", tool_calls=None):
+def _make_openai_response(content="result", tool_calls=None, prompt_tokens=10, completion_tokens=5):
     msg = MagicMock()
     msg.content = content
     msg.tool_calls = tool_calls or []
@@ -9,6 +9,8 @@ def _make_openai_response(content="result", tool_calls=None):
     choice.message = msg
     resp = MagicMock()
     resp.choices = [choice]
+    resp.usage.prompt_tokens = prompt_tokens
+    resp.usage.completion_tokens = completion_tokens
     return resp
 
 
@@ -16,9 +18,10 @@ def test_financials_agent_returns_string():
     from agents.financials import run as run_financials
     with patch("agents.financials._get_client") as mock_client:
         mock_client.return_value.chat.completions.create.return_value = _make_openai_response("AAPL revenue is $400B")
-        result = run_financials("What is AAPL revenue?")
+        result, tokens = run_financials("What is AAPL revenue?")
     assert isinstance(result, str)
     assert len(result) > 0
+    assert isinstance(tokens, int)
 
 
 def test_financials_agent_calls_tool_when_requested():
@@ -35,7 +38,7 @@ def test_financials_agent_calls_tool_when_requested():
     with patch("agents.financials._get_client") as mock_client, \
          patch.dict(TOOL_FUNCTIONS, {"get_income_statement": lambda ticker: "Revenue: $400B"}):
         mock_client.return_value.chat.completions.create.side_effect = [tool_response, final_response]
-        result = run_financials("What is AAPL revenue?")
+        result, tokens = run_financials("What is AAPL revenue?")
 
     assert "AAPL" in result or "400" in result
 
@@ -44,9 +47,10 @@ def test_news_agent_returns_string():
     from agents.news import run as run_news
     with patch("agents.news._get_client") as mock_client:
         mock_client.return_value.chat.completions.create.return_value = _make_openai_response("Apple released iPhone 17.")
-        result = run_news("What is the latest news on AAPL?")
+        result, tokens = run_news("What is the latest news on AAPL?")
     assert isinstance(result, str)
     assert len(result) > 0
+    assert isinstance(tokens, int)
 
 
 def test_news_agent_only_has_news_tools():
@@ -58,9 +62,10 @@ def test_calc_agent_returns_string():
     from agents.calc import run as run_calc
     with patch("agents.calc._get_client") as mock_client:
         mock_client.return_value.chat.completions.create.return_value = _make_openai_response("AAPL revenue CAGR: 8.2%")
-        result = run_calc("What is AAPL 3-year revenue CAGR?")
+        result, tokens = run_calc("What is AAPL 3-year revenue CAGR?")
     assert isinstance(result, str)
     assert len(result) > 0
+    assert isinstance(tokens, int)
 
 
 def test_calc_agent_only_has_calc_tools():

@@ -4,7 +4,6 @@ import logging
 
 from langfuse import observe
 from tools.llm import _get_client
-from monitoring import record_tool, record_agent, update_agent_tokens
 from tools.config import MODEL_AGENT
 from tools.income import get_income_statement, get_quarterly_statement
 from tools.company import get_company_info
@@ -105,7 +104,7 @@ OPT = {"temperature": 0.1}
 
 
 @observe(name="financials-agent")
-def run(user_question: str, context: str = "", history: list[dict] | None = None, agent_id: int | None = None, expected_tickers: list[str] | None = None) -> str:
+def run(user_question: str, context: str = "", history: list[dict] | None = None, expected_tickers: list[str] | None = None) -> tuple[str, int]:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if history:
         messages += history[-6:]
@@ -161,9 +160,8 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
             _dur = round((time.perf_counter() - _t) * 1000)
             _err = result[:120] if isinstance(result, str) and result.startswith("TOOL_ERROR") else None
             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
-            logging.info("[FinancialsAgent] %s(%s)", name, args)
-            if agent_id is not None:
-                record_tool(agent_id=agent_id, tool_name=name, duration_ms=_dur, arguments=args, result=result if not _err else None, error=_err)
+            _preview = (result if isinstance(result, str) else str(result)).replace("\n", " ")[:300]
+            logging.info("[FinancialsAgent] %s(%s) → %dms\n  ↳ %s", name, args, _dur, _preview)
         response = _chat(
             model=MODEL_AGENT,
             messages=messages,
@@ -173,11 +171,6 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
         msg = response.choices[0].message
 
     summary = msg.content or ""
-    total_tokens = total_prompt_tokens + total_completion_tokens
-    logging.info("[FinancialsAgent] tokens: prompt=%d completion=%d total=%d",
-                 total_prompt_tokens, total_completion_tokens, total_tokens)
-    if agent_id is not None:
-        update_agent_tokens(agent_id, total_tokens)
 
     if expected_tickers:
         missing = [t for t in expected_tickers if t not in summary]
@@ -194,4 +187,7 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
             if fix_response.choices[0].message.content:
                 summary += "\n\n" + fix_response.choices[0].message.content
 
-    return summary
+    total_tokens = total_prompt_tokens + total_completion_tokens
+    logging.info("[FinancialsAgent] tokens: prompt=%d completion=%d total=%d",
+                 total_prompt_tokens, total_completion_tokens, total_tokens)
+    return summary, total_tokens

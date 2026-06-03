@@ -59,7 +59,7 @@ def test_single_agent_plan_calls_correct_agent():
 
     with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("AAPL revenue is $400B.", 0)]), \
          patch("orchestrator.is_uncertain", return_value=False), \
-         patch("orchestrator.run_financials", return_value="Revenue: $400B") as mock_fin, \
+         patch("orchestrator.run_financials", return_value=("Revenue: $400B", 0)) as mock_fin, \
          patch("orchestrator.run_news") as mock_news, \
          patch("orchestrator.run_calc") as mock_calc:
 
@@ -78,8 +78,8 @@ def test_multi_agent_both_called_in_parallel():
 
     with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("AAPL DCF: $195/share", 0)]), \
          patch("orchestrator.is_uncertain", return_value=False), \
-         patch("orchestrator.run_financials", return_value="AAPL operating income: $120B") as mock_fin, \
-         patch("orchestrator.run_calc", return_value="DCF: $195/share") as mock_calc:
+         patch("orchestrator.run_financials", return_value=("AAPL operating income: $120B", 0)) as mock_fin, \
+         patch("orchestrator.run_calc", return_value=("DCF: $195/share", 0)) as mock_calc:
 
         result, _ = process_turn("Calculate AAPL DCF", [])
 
@@ -100,7 +100,7 @@ def test_malformed_plan_uses_keyword_fallback():
     ]), \
          patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator.run_financials") as mock_fin, \
-         patch("orchestrator.run_news", return_value="Headline: Apple up 2%") as mock_news, \
+         patch("orchestrator.run_news", return_value=("Headline: Apple up 2%", 0)) as mock_news, \
          patch("orchestrator.run_calc") as mock_calc:
 
         process_turn("latest news on AAPL", [])
@@ -117,7 +117,7 @@ def test_agent_failure_is_skipped_gracefully():
     with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("Here is what I found.", 0)]), \
          patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator.run_financials", side_effect=Exception("timeout")), \
-         patch("orchestrator.run_news", return_value="Apple up 2%"):
+         patch("orchestrator.run_news", return_value=("Apple up 2%", 0)):
 
         result, _ = process_turn("AAPL news and financials", [])
 
@@ -135,7 +135,7 @@ def test_tavily_fallback_triggered_when_uncertain():
          patch("orchestrator.is_uncertain", return_value=True), \
          patch("orchestrator._web_search_with_sources",
                return_value=("Apple revenue was $94B per Reuters.", ["https://reuters.com/aapl"])), \
-         patch("orchestrator.run_financials", return_value="Revenue: $391B"):
+         patch("orchestrator.run_financials", return_value=("Revenue: $391B", 0)):
         result, _ = process_turn("What is AAPL revenue?", [])
 
     assert "https://reuters.com/aapl" in result

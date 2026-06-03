@@ -27,7 +27,6 @@ def _log_agent_error(agent_name: str, error: Exception):
 
 from tools.config import MODEL, MODEL_PLAN, MODEL_SYNTHESIS
 from tools.llm import llm_chat
-from monitoring import record_turn, record_agent, update_agent_output, update_turn_synthesis, get_turn_agent_tokens, init_db
 from agents.financials import run as run_financials
 from agents.news import run as run_news
 from agents.calc import run as run_calc
@@ -37,6 +36,16 @@ from tools.search_guardrails import is_uncertain, _web_search_with_sources
 
 OPT_PLAN = {"temperature": 0.0}
 OPT_SYNTH = {"temperature": 0.3}
+
+
+@observe(name="planner")
+def _plan_step(messages: list[dict]) -> tuple[str, int]:
+    return llm_chat(MODEL_PLAN, messages, temperature=0.0)
+
+
+@observe(name="synthesis")
+def _synthesis_step(messages: list[dict], temperature: float = 0.3) -> tuple[str, int]:
+    return llm_chat(MODEL_SYNTHESIS, messages, temperature=temperature)
 
 
 def _parse_plan(content: str) -> dict:
@@ -125,7 +134,7 @@ def process_turn(
         agents_to_run = []
         logging.info("[Orchestrator] conversational — no agents called")
     else:
-        plan_content, plan_tokens = llm_chat(MODEL_PLAN, planning_messages, temperature=0.0)
+        plan_content, plan_tokens = _plan_step(planning_messages)
         orchestrator_plan_text = plan_content
         logging.info("[timing] plan call: %.2fs", time.time() - t0)
         try:
@@ -138,13 +147,6 @@ def process_turn(
             logging.warning("[Orchestrator] plan JSON malformed — using keyword fallback")
             agents_to_run = _keyword_fallback(user_input)
             logging.info("[Orchestrator] keyword fallback → agents=%s", agents_to_run)
-
-    # Record turn start - capture user query and plan
-    turn_id = record_turn(
-        user_query=user_input,
-        orchestrator_plan=orchestrator_plan_text if not _is_conversational(user_input) else None,
-        agents_called=agents_to_run,
-    )
 
     accumulated_context = ""
     agent_map = {
@@ -161,26 +163,25 @@ def process_turn(
         fn = agent_map.get(agent_name)
         if fn is None:
             logging.warning("[Orchestrator] unknown agent '%s' — skipping", agent_name)
-            return agent_name, None
+            return agent_name, None, 0
         try:
             logging.info("[Orchestrator] → calling agent: %s", agent_name)
             t1 = time.time()
-            agent_id = record_agent(turn_id=turn_id, agent_name=agent_name)
-            result = fn(agent_input, "", history=messages, agent_id=agent_id, expected_tickers=tickers if tickers else None)
-            agent_dur = round((time.time() - t1) * 1000)
-            update_agent_output(agent_id=agent_id, output=result, duration_ms=agent_dur)
+            result, agent_tokens = fn(agent_input, "", history=messages, expected_tickers=tickers if tickers else None)
             logging.info("[Orchestrator] ✓ agent %s done (%.2fs)", agent_name, time.time() - t1)
-            return agent_name, result
+            return agent_name, result, agent_tokens
         except Exception as e:
             logging.warning("[Orchestrator] %s agent failed — %s", agent_name, e)
             _log_agent_error(agent_name, e)
-            return agent_name, None
+            return agent_name, None, 0
 
+    agent_tokens_total = 0
     with ThreadPoolExecutor() as executor:
         futures = {executor.submit(_run_agent, name): name for name in agents_to_run}
         agent_results = {}
         for future in as_completed(futures):
-            name, result = future.result()
+            name, result, agent_tokens = future.result()
+            agent_tokens_total += agent_tokens
             if result is not None:
                 agent_results[name] = result
 
@@ -206,7 +207,7 @@ def process_turn(
 
     t2 = time.time()
     logging.info("[Synthesis] model=%s agents_context=%d chars", MODEL_SYNTHESIS, len(accumulated_context))
-    answer, synth_tokens = llm_chat(MODEL_SYNTHESIS, synthesis_messages, temperature=0.3)
+    answer, synth_tokens = _synthesis_step(synthesis_messages)
     logging.info("[Synthesis] output preview: %s", answer[:120].replace("\n", " "))
     if agents_to_run and is_uncertain(answer, threshold=0.85):
         snippets, urls = _web_search_with_sources(user_input)
@@ -215,7 +216,7 @@ def process_turn(
                 "role": "user",
                 "content": f"Web search results:\n{snippets}\n\nUse these to answer the question.",
             }]
-            fallback_answer, fallback_tokens = llm_chat(MODEL_SYNTHESIS, web_messages, temperature=0.3)
+            fallback_answer, fallback_tokens = _synthesis_step(web_messages)
             answer = fallback_answer or answer
             synth_tokens += fallback_tokens
             logging.info("[Synthesis] web-fallback output preview: %s", answer[:120].replace("\n", " "))
@@ -224,14 +225,10 @@ def process_turn(
             logging.info("[Orchestrator] Tavily fallback used (%d sources)", len(urls))
     logging.info("[timing] synthesis call: %.2fs", time.time() - t2)
 
-    agent_tokens = get_turn_agent_tokens(turn_id)
-    total_tokens = plan_tokens + agent_tokens + synth_tokens
+    total_tokens = plan_tokens + agent_tokens_total + synth_tokens
     logging.info("[tokens] plan=%d agents=%d synthesis=%d total=%d",
-                 plan_tokens, agent_tokens, synth_tokens, total_tokens)
+                 plan_tokens, agent_tokens_total, synth_tokens, total_tokens)
     logging.info("[timing] total turn: %.2fs", time.time() - t0)
-
-    # Save synthesis output, total duration and total tokens
-    update_turn_synthesis(turn_id=turn_id, synthesis_output=answer, total_duration_ms=round((time.time() - t0) * 1000), total_tokens=total_tokens)
 
     updated_messages = messages + [
         {"role": "user", "content": user_input},

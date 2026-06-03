@@ -4,7 +4,6 @@ import logging
 
 from langfuse import observe
 from tools.llm import _get_client
-from monitoring import record_tool, update_agent_tokens
 from tools.config import MODEL_AGENT
 from tools.news import get_stock_news, search_news
 from prompts import NEWS_SYSTEM as SYSTEM_PROMPT
@@ -53,7 +52,7 @@ OPT = {"temperature": 0.1}
 
 
 @observe(name="news-agent")
-def run(user_question: str, context: str = "", history: list[dict] | None = None, agent_id: int | None = None) -> str:
+def run(user_question: str, context: str = "", history: list[dict] | None = None, expected_tickers: list[str] | None = None) -> tuple[str, int]:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if history:
         messages += history[-6:]
@@ -109,9 +108,8 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
             _dur = round((time.perf_counter() - _t) * 1000)
             _err = result[:120] if isinstance(result, str) and result.startswith("TOOL_ERROR") else None
             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
-            logging.info("[NewsAgent] %s(%s)", name, args)
-            if agent_id is not None:
-                record_tool(agent_id=agent_id, tool_name=name, duration_ms=_dur, arguments=args, result=result if not _err else None, error=_err)
+            _preview = (result if isinstance(result, str) else str(result)).replace("\n", " ")[:300]
+            logging.info("[NewsAgent] %s(%s) → %dms\n  ↳ %s", name, args, _dur, _preview)
         response = _chat(
             model=MODEL_AGENT,
             messages=messages,
@@ -123,6 +121,4 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
     total_tokens = total_prompt_tokens + total_completion_tokens
     logging.info("[NewsAgent] tokens: prompt=%d completion=%d total=%d",
                  total_prompt_tokens, total_completion_tokens, total_tokens)
-    if agent_id is not None:
-        update_agent_tokens(agent_id, total_tokens)
-    return msg.content or ""
+    return (msg.content or ""), total_tokens
