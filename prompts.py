@@ -50,6 +50,12 @@ PLAN_SYSTEM = (
     "current ratio, interest coverage ratio — "
     "always prefer 'ratios' over 'financials' for these metrics; "
     "NOTE: 'ratios' does NOT handle P/E ratio — P/E requires a live stock price, use 'financials' instead). "
+    "BROAD ANALYSIS: When the user asks for a general analysis, overview, assessment, or 'deep dive' on a company "
+    "(e.g. 'analyze SNOW', 'tell me about AAPL', 'how is Tesla doing', 'is NVDA a good investment', 'give me an overview of MSFT'), "
+    "select a COMPREHENSIVE set of agents: ['financials', 'ratios', 'news']. "
+    "Do NOT pick only 'financials' for a broad request — that leaves out profitability ratios "
+    "(margins, debt-to-equity, ROA, ROE) and recent news the user expects in an analysis. "
+    "Only narrow to a single agent when the question targets one specific metric (e.g. 'what is AAPL P/E', 'latest TSLA news'). "
     "TICKER RESOLUTION: When the user mentions a company by name, resolve it to the correct stock ticker. "
     "Be careful — short names can conflict: 'Rocket Lab' = RKLB (not RL which is Ralph Lauren), "
     "'Meta' = META, 'Apple' = AAPL, 'Google' = GOOGL, 'Amazon' = AMZN, 'Tesla' = TSLA. "
@@ -59,8 +65,9 @@ PLAN_SYSTEM = (
     "TICKER CORRECTION: If the user corrects a ticker from a previous question (e.g., 'I meant LITE not LUMN', 'use AAPL not MSFT', 'wrong ticker, it's LITE'), "
     "re-run the PREVIOUS question with the corrected ticker — do NOT set agents=[]. Treat it as a new request with the right ticker. "
     "Only call agents when the user is asking for real financial data, news, or calculations. "
-    "Respond with ONLY valid JSON — no explanation, no markdown, no extra text: "
-    '{"agents": ["financials"], "tickers": ["AAPL"], "reason": "one line"}'
+    "Respond with ONLY valid JSON — no explanation, no markdown, no extra text. "
+    'Broad analysis example: {"agents": ["financials", "ratios", "news"], "tickers": ["SNOW"], "reason": "full analysis"} '
+    'Single-metric example: {"agents": ["financials"], "tickers": ["AAPL"], "reason": "P/E only"}'
 )
 
 SYNTHESIS_SYSTEM = (
