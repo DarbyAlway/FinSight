@@ -21,9 +21,22 @@ def calculate_all_margins(ticker: str) -> str:
     if not revenue_rows:
         return f"ERROR: No revenue data for {ticker} — call get_income_statement first."
 
-    rev_by_year = {r["fiscal_year"]: r["value"] for r in revenue_rows}
+    # Use max value for revenue (total revenue > sub-items like product revenue or cost of revenue)
+    rev_by_year: dict[str, float] = {}
+    for r in revenue_rows:
+        fy = r["fiscal_year"]
+        if r["value"] > rev_by_year.get(fy, 0):
+            rev_by_year[fy] = r["value"]
+
     gross_by_year = {r["fiscal_year"]: r["value"] for r in gross_rows}
-    net_by_year = {r["fiscal_year"]: r["value"] for r in net_rows}
+
+    # Use max absolute value for net income/loss (total > sub-items like noncontrolling interest)
+    net_by_year: dict[str, float] = {}
+    for r in net_rows:
+        fy = r["fiscal_year"]
+        if abs(r["value"]) > abs(net_by_year.get(fy, 0)):
+            net_by_year[fy] = r["value"]
+
     op_by_year = {r["fiscal_year"]: r["value"] for r in op_rows}
 
     years = sorted(rev_by_year.keys(), key=_parse_fiscal_year, reverse=True)
@@ -116,10 +129,11 @@ def calculate_roa_roe(ticker: str) -> str:
     if not net_rows:
         return f"ERROR: No net income data for {ticker} — call get_income_statement first."
 
-    net_by_year = {}
+    # Use max absolute value (total net income/loss > sub-items like noncontrolling interest)
+    net_by_year: dict[str, float] = {}
     for r in net_rows:
         fy = r["fiscal_year"]
-        if fy not in net_by_year:
+        if abs(r["value"]) > abs(net_by_year.get(fy, 0)):
             net_by_year[fy] = r["value"]
 
     with duckdb.connect(DB_PATH) as con:

@@ -139,6 +139,8 @@ def load_from_cache(ticker: str) -> str:
 def fuzzy_query(ticker: str, line_item: str) -> list[dict]:
     term = line_item.lower().strip()
     patterns = SYNONYMS.get(term, [f"%{term}%"])
+    seen: set[tuple] = set()
+    results: list[dict] = []
     for pattern in patterns:
         with duckdb.connect(DB_PATH) as con:
             rows = con.execute(
@@ -149,12 +151,12 @@ def fuzzy_query(ticker: str, line_item: str) -> list[dict]:
                    ORDER BY fiscal_year DESC""",
                 (ticker, pattern, pattern),
             ).fetchall()
-        if rows:
-            return [
-                {"fiscal_year": r[0], "section": r[1], "line_item": r[2], "value": r[3]}
-                for r in rows
-            ]
-    return []
+        for r in rows:
+            key = (r[0], r[2])  # (fiscal_year, line_item) — deduplicate
+            if key not in seen:
+                seen.add(key)
+                results.append({"fiscal_year": r[0], "section": r[1], "line_item": r[2], "value": r[3]})
+    return results
 
 
 def save_ticker_info(symbol: str, info: dict):

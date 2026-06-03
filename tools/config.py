@@ -8,7 +8,7 @@ TICKER_INFO_TTL_HOURS = 24
 
 SYNONYMS = {
     "revenue":          ["%revenue%", "%net sales%", "%total sales%", "%total revenues%"],
-    "net income":       ["%net income%", "%net earnings%", "%profit%", "%net loss%"],
+    "net income":       ["%net income%", "%net earnings%", "%net profit%", "%net loss%"],
     "gross margin":     ["%gross margin%", "%gross profit%"],
     "r&d":              ["%research%", "%development%", "%technology and content%"],
     "operating income": ["%operating income%", "%income from operations%", "%operating loss%"],

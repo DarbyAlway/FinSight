@@ -7,7 +7,6 @@ load_dotenv()
 from edgar import set_identity
 
 from tools.config import MODEL
-from monitoring import init_db as init_monitoring_db
 from tools.db import init_db
 from tools.vector import init_qdrant
 from tools.search_guardrails import _get_anchor_vecs, web_search_fallback, is_uncertain
@@ -46,18 +45,6 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-
-def _init_phoenix():
-    try:
-        import phoenix as px
-        from openinference.instrumentation.openai import OpenAIInstrumentor
-        session = px.launch_app()
-        OpenAIInstrumentor().instrument()
-        logging.info("Phoenix tracing enabled: %s", session.url)
-    except ImportError:
-        pass
-    except Exception as e:
-        logging.warning("Phoenix init failed — tracing disabled: %s", e)
 
 
 def _build_persona_system(persona_key: str | None) -> str | None:
@@ -101,9 +88,7 @@ def chat():
 
 
 if __name__ == "__main__":
-    init_monitoring_db()
     init_db()
     init_qdrant()
     _get_anchor_vecs()
-    _init_phoenix()
     chat()
