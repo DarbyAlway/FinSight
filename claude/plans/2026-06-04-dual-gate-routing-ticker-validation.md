@@ -2,8 +2,14 @@
 
 **Date:** 2026-06-04
 **Branch:** `feature/sambanova`
-**Status:** Planned — implement next session
+**Status:** In progress
 **Models in use:** agents = `gpt-oss-120b`, planner/synthesis = `Meta-Llama-3.3-70B-Instruct` (SambaNova)
+
+### Progress log
+- **2026-06-04 — Phase A DONE** (committed `3f247ca`): shared guarded `run_tool_loop` (max-iter / duplicate-call cache / no-progress / token budget) wired into all 4 agents; ratios made self-sufficient (`get_income_statement` + `get_company_info`). Validated on SambaNova: the 85k ratios loop → ~11k. 7 new tests.
+- **2026-06-05 — Data-integrity parser fixes DONE** (committed `63d3b0f`), ahead of Phase F: (1) **fiscal-year swap** — parsers grabbed the `"X to Y"` period label instead of the column header, swapping every value's year on all 2-column statements (every balance sheet + 2-year cash flows; e.g. MSFT assets/ROE, LITE FCF trend inverted) → skip `" to "` lines in all 3 parsers; (2) **lexicographic `ORDER BY fiscal_year`** on date strings → `try_strptime(...)` across 12 queries; (3) **capex "not found"** → broadened LIKE patterns. Cache flushed for real tickers. Verified vs SEC 10-K + stockanalysis.com.
+- **2026-06-05 — calc agent self-sufficiency DONE** (pending commit): added `get_company_info` / `get_income_statement` / `get_cash_flow_statement` / `get_balance_sheet` to calc + prerequisite hints in `calculate_*` descriptions (fixes "No company info" PEG failure on a calc-only plan — see I2/I3 principle). **Decision: keep the DuckDB cache** — it's what makes per-agent self-sufficiency cheap (first fetch ~5s, cached ~50ms; duplicate fetches de-duped by cache + guardrail).
+- **Still pending:** Phase B–D (dual-gate router / ticker validation), Phase F (Pydantic parser validation + "LLM quotes tool numbers, never recomputes" — seen live: synthesis recomputed PEG 1.53 despite the tool erroring), I1/I4, and **I5** (web-search trigger, below).
 
 ---
 
@@ -237,9 +243,29 @@ The planner routes by a high-level agent description but doesn't know each agent
 Conversation history is fed into agents (`history[-6:]`) and full into synthesis, so tokens grow every turn (the SNOW run jumped 17.5k→20k from one prior turn). 
 - **Fix:** (a) stop feeding raw history to data-fetch agents (they rarely need it), and/or (b) **summarize previous turns** into a short running summary instead of passing full prior responses. Reduces per-turn token cost, especially in long sessions.
 
+### I5 — Web-search fallback trigger is unreliable (don't just lower the threshold) — added 2026-06-05
+Observed on `"what about PEG?"` for LITE: the calc agent returned only `ERROR: No company info`, synthesis said *"There is no information available…"*, but the Tavily fallback did **not** fire (`is_uncertain score=0.837 < 0.85`). Tempting fix = lower the threshold. **Measured the score distribution and proved that won't work** — `is_uncertain` embeds the answer and takes max cosine vs ~130 "I don't know" anchors, but the scores barely separate:
+
+| Answer | Score |
+|---|---|
+| UNCERTAIN — "I don't have enough data" | **0.982** |
+| UNCERTAIN — PEG "no information available" | **0.836** |
+| CONFIDENT — greeting | 0.832 |
+| CONFIDENT — "FCF −$105M / −$108M" | 0.802 |
+| CONFIDENT — "MSFT ROA 16.5%, ROE 29.6%" | 0.796 |
+| CONFIDENT — "PEG ≈ 1.53…" | 0.775 |
+
+The failing answer (0.836) is **tied with a confident greeting (0.832)** and sits on top of the confident cluster (0.775–0.832). No threshold catches it without false-firing on confident answers. **Root cause:** `multilingual-e5-large` is used **without its required `query:`/`passage:` prefixes**, compressing all short English sentences into a 0.77–0.98 band; only blatant "I don't know" (0.98) stands out.
+
+**Fix (do this, not threshold-tuning):**
+- **Primary — deterministic empty/error trigger.** Fire the web fallback when agents returned nothing usable: `accumulated_context` empty, or every agent output is an `ERROR:` / `No …` / `TOOL_ERROR` line. This is the reliable signal (the failing run had `agents_context=77 chars`). Reliable, zero false positives on confident answers. (This is the "fire on empty agent outputs vs text-scoring" item, now promoted from out-of-scope.)
+- **Secondary — keep `is_uncertain` at the high threshold** (≥0.85) so blatant "I don't know" (0.98) still fires; stop relying on it for borderline cases it can't separate.
+- **Optional — add `query:`/`passage:` prefixes** to anchors + candidate to sharpen the e5 signal (separate, lower-priority improvement).
+- Note: for the specific PEG/LITE case the *real* fix was self-sufficiency (calc now fetches its own data) — web search shouldn't be the answer for locally-computable metrics. The empty/error trigger is the safety net for genuinely-unanswerable queries.
+
 ## Connection to LangGraph migration
 This router *is* the LangGraph entry node. `orchestrator_router_node` → conditional edges → agent nodes. Implementing the dual-gate router is the first concrete step of the LangGraph migration we brainstormed (re-planning / decomposition is the later phase, built on this stable base).
 
 ## Out of scope (later)
 - Query decomposition / self-generated sub-questions (the LangGraph re-planning headline feature).
-- Improving the Tavily trigger (fire on empty agent outputs vs text-scoring).
+- ~~Improving the Tavily trigger (fire on empty agent outputs vs text-scoring).~~ → promoted to **I5** (with measured evidence).

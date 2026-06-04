@@ -75,5 +75,8 @@ def test_calc_agent_only_has_calc_tools():
         "calculate_revenue_cagr", "calculate_margin_trend", "calculate_yoy",
         "calculate_correlation", "rank_tickers", "get_price_history",
         "calculate_free_cash_flow", "calculate_cash_runway",
+        # data-fetch tools so calc can self-serve its calculate_* inputs
+        "get_company_info", "get_income_statement",
+        "get_cash_flow_statement", "get_balance_sheet",
     }
     assert set(TOOL_FUNCTIONS.keys()) == expected
