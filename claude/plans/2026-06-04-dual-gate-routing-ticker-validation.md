@@ -263,6 +263,55 @@ The failing answer (0.836) is **tied with a confident greeting (0.832)** and sit
 - **Optional — add `query:`/`passage:` prefixes** to anchors + candidate to sharpen the e5 signal (separate, lower-priority improvement).
 - Note: for the specific PEG/LITE case the *real* fix was self-sufficiency (calc now fetches its own data) — web search shouldn't be the answer for locally-computable metrics. The empty/error trigger is the safety net for genuinely-unanswerable queries.
 
+### I6 — Agent input-token cost: measured breakdown + no SambaNova caching — added 2026-06-05
+Instrumented a real ratios turn (MSFT, data cached). The per-call prompt growth shows the cost is the **re-send multiplier**, not one big prompt — the *final* call was only 2,814 tokens but the agent billed **10,232** cumulative over 5 LLM calls:
+
+```
+call 1: prompt=  715   (system + 8 tool schemas)
+call 2: prompt= 1574   (+859  income statement dump)
+call 3: prompt= 2476   (+902  balance sheet dump)
+call 4: prompt= 2653   (+177  margins table)
+call 5: prompt= 2814   (+161  ROA/ROE table)
+SUM   = 10,232 over 5 calls
+```
+
+| Component | Size | Re-sent | Cumulative | Share |
+|---|---|---|---|---|
+| Static prefix (system + 8 tool schemas) | 715 | ×5 | ~3,575 | **35%** |
+| Income statement dump | ~859 | ×4 | ~3,436 | **34%** |
+| Balance sheet dump | ~902 | ×3 | ~2,706 | **26%** |
+| Actual calc result tables | ~170 ea | — | small | ~5% |
+
+**SambaNova does NOT support prompt caching** (verified): `prompt_tokens_details.cached_tokens = null`; an identical 1,838-token prompt sent back-to-back was billed 1,838 both times, same latency. So the "cache the static prefix" lever is unavailable — every re-sent byte is paid.
+
+**Key insight:** the data-fetch tools (`get_income_statement`, `get_balance_sheet`) dump the **full statement** into context, but in the **calc/ratios** agents those tools exist only to populate the DuckDB cache — the real numbers come from the `calculate_*` tools reading the DB. So ~1,760 tokens of statement text is carried and re-billed 3–4× for nothing.
+
+**Levers (caching ruled out), by ROI:**
+1. **Compact fetch-tool output in calc/ratios** — return a short confirmation (`"MSFT income loaded: FY2025 rev $281,724M, net $101,832M"`) instead of the full dump. Cuts ~50–60% off those agents. *Per-agent:* the **financials** agent needs the full text (it summarizes it for the user), so keep full there, slim for calc/ratios.
+2. **Slim the tool schemas** — 715×5 = 35%; with no caching every schema byte is paid per round. Tighter descriptions / fewer tools per agent.
+3. **Fewer rounds** — 4 sequential tool calls = 5 re-sends; batching fetches into one round helps but the model controls it.
+
+Estimated ~50–65% input-token reduction on the heavy agents from #1+#2. Independent of the routing work; pairs naturally with Phase F (structured data → less free-text re-sending).
+
+### I7 — Langfuse: one trace per agent instead of one per query — added 2026-06-05
+In the Langfuse UI each query produces **multiple top-level rows — one per agent** (financials, calc, …) instead of a **single query trace with the agents nested inside it**. Desired: `"what is MSFT PEG?"` = one row → planner + financials + calc + synthesis as child spans.
+
+**Root cause:** agents run in a `ThreadPoolExecutor` (`_run_agent` in `orchestrator.py`). Langfuse 4.7.0 is OTEL-based, and the `@observe` decorator nests via the **OpenTelemetry context** — which is **not propagated across thread boundaries**. So each agent thread has an empty context and its `@observe` (`ratios-agent`, etc.) starts a **new root trace**. The planner/synthesis nest fine because they run on the main thread.
+
+**Fix (planned, ~6 lines):** capture the current OTEL context in the main thread and re-attach it inside each worker thread:
+```python
+from opentelemetry import context as otel_context
+# inside process_turn, before the ThreadPoolExecutor:
+parent_ctx = otel_context.get_current()
+def _run_agent(agent_name):
+    ctx_token = otel_context.attach(parent_ctx)
+    try:
+        ...existing body...
+    finally:
+        otel_context.detach(ctx_token)
+```
+Verify by running a multi-agent query (e.g. `"what is MSFT PEG?"` → financials+calc) and confirming all agent spans share the `process_turn` trace id (one row, nested children). No SDK upgrade needed.
+
 ## Connection to LangGraph migration
 This router *is* the LangGraph entry node. `orchestrator_router_node` → conditional edges → agent nodes. Implementing the dual-gate router is the first concrete step of the LangGraph migration we brainstormed (re-planning / decomposition is the later phase, built on this stable base).
 
