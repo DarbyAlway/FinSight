@@ -72,7 +72,7 @@ def calculate_debt_to_equity(ticker: str) -> str:
 
     with duckdb.connect(DB_PATH) as con:
         fy_row = con.execute(
-            "SELECT fiscal_year FROM balance_sheets WHERE ticker = ? ORDER BY fiscal_year DESC LIMIT 1",
+            "SELECT fiscal_year FROM balance_sheets WHERE ticker = ? ORDER BY try_strptime(fiscal_year, '%b %d, %Y') DESC NULLS LAST LIMIT 1",
             (ticker,)
         ).fetchone()
         if not fy_row:
@@ -186,7 +186,7 @@ def calculate_roa_roe(ticker: str) -> str:
 def calculate_current_ratio(ticker: str) -> str:
     with duckdb.connect(DB_PATH) as con:
         fy_row = con.execute(
-            "SELECT fiscal_year FROM balance_sheets WHERE ticker = ? ORDER BY fiscal_year DESC LIMIT 1",
+            "SELECT fiscal_year FROM balance_sheets WHERE ticker = ? ORDER BY try_strptime(fiscal_year, '%b %d, %Y') DESC NULLS LAST LIMIT 1",
             (ticker,)
         ).fetchone()
         if not fy_row:
@@ -244,7 +244,7 @@ def calculate_interest_coverage(ticker: str) -> str:
             """SELECT fiscal_year, value FROM income_statements
                WHERE ticker = ?
                AND lower(line_item) LIKE '%interest expense%'
-               ORDER BY fiscal_year DESC LIMIT 2""",
+               ORDER BY try_strptime(fiscal_year, '%b %d, %Y') DESC NULLS LAST LIMIT 2""",
             (ticker,)
         ).fetchall()
 

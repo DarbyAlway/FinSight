@@ -25,6 +25,11 @@ def parse_balance_sheet(ticker: str, raw: str) -> list[dict]:
     )
     fiscal_years = []
     for line in raw.split('\n'):
+        # Skip period-range labels like "Jun 29, 2024 to Jun 28, 2025": they list
+        # dates ascending and tie the real (descending) column header on 2-column
+        # statements, which would swap every value onto the wrong fiscal year.
+        if ' to ' in line:
+            continue
         years = year_re.findall(line)
         if len(years) > len(fiscal_years):
             fiscal_years = years

@@ -185,7 +185,7 @@ def calculate_free_cash_flow(ticker: str) -> str:
                WHERE ticker = ?
                AND (lower(line_item) LIKE '%operating activities%'
                     OR lower(line_item) LIKE '%cash from operations%')
-               ORDER BY fiscal_year DESC LIMIT 2""",
+               ORDER BY try_strptime(fiscal_year, '%b %d, %Y') DESC NULLS LAST LIMIT 2""",
             (ticker,)
         ).fetchall()
         if not op_rows:
@@ -198,8 +198,10 @@ def calculate_free_cash_flow(ticker: str) -> str:
                WHERE ticker = ?
                AND section = 'Investing Activities'
                AND (lower(line_item) LIKE '%capital expenditure%'
-                    OR lower(line_item) LIKE '%purchases of property%')
-               ORDER BY fiscal_year DESC LIMIT 2""",
+                    OR lower(line_item) LIKE '%purchases of property%'
+                    OR lower(line_item) LIKE '%acquisition of property%'
+                    OR lower(line_item) LIKE '%payments for property%')
+               ORDER BY try_strptime(fiscal_year, '%b %d, %Y') DESC NULLS LAST LIMIT 2""",
             (ticker,)
         ).fetchall()
 
@@ -225,7 +227,7 @@ def calculate_cash_runway(ticker: str) -> str:
             """SELECT fiscal_year, value FROM balance_sheets
                WHERE ticker = ?
                AND lower(line_item) LIKE '%cash and cash equivalents%'
-               ORDER BY fiscal_year DESC LIMIT 1""",
+               ORDER BY try_strptime(fiscal_year, '%b %d, %Y') DESC NULLS LAST LIMIT 1""",
             (ticker,)
         ).fetchall()
         if not cash_rows:
@@ -238,7 +240,7 @@ def calculate_cash_runway(ticker: str) -> str:
                WHERE ticker = ?
                AND (lower(line_item) LIKE '%operating activities%'
                     OR lower(line_item) LIKE '%cash from operations%')
-               ORDER BY fiscal_year DESC LIMIT 2""",
+               ORDER BY try_strptime(fiscal_year, '%b %d, %Y') DESC NULLS LAST LIMIT 2""",
             (ticker,)
         ).fetchall()
         if not op_rows:
@@ -251,8 +253,10 @@ def calculate_cash_runway(ticker: str) -> str:
                WHERE ticker = ?
                AND section = 'Investing Activities'
                AND (lower(line_item) LIKE '%capital expenditure%'
-                    OR lower(line_item) LIKE '%purchases of property%')
-               ORDER BY fiscal_year DESC LIMIT 2""",
+                    OR lower(line_item) LIKE '%purchases of property%'
+                    OR lower(line_item) LIKE '%acquisition of property%'
+                    OR lower(line_item) LIKE '%payments for property%')
+               ORDER BY try_strptime(fiscal_year, '%b %d, %Y') DESC NULLS LAST LIMIT 2""",
             (ticker,)
         ).fetchall()
 

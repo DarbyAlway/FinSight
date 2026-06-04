@@ -126,7 +126,7 @@ def load_from_cache(ticker: str) -> str:
     with duckdb.connect(DB_PATH) as con:
         rows = con.execute(
             "SELECT fiscal_year, section, line_item, value FROM income_statements "
-            "WHERE ticker = ? ORDER BY fiscal_year DESC, section, line_item",
+            "WHERE ticker = ? ORDER BY try_strptime(fiscal_year, '%b %d, %Y') DESC NULLS LAST, section, line_item",
             (ticker,)
         ).fetchall()
     if not rows:
@@ -153,7 +153,7 @@ def fuzzy_query(ticker: str, line_item: str) -> list[dict]:
                    FROM income_statements
                    WHERE ticker = ?
                      AND (lower(section) LIKE ? OR lower(line_item) LIKE ?)
-                   ORDER BY fiscal_year DESC""",
+                   ORDER BY try_strptime(fiscal_year, '%b %d, %Y') DESC NULLS LAST""",
                 (ticker, pattern, pattern),
             ).fetchall()
         for r in rows:
@@ -288,7 +288,7 @@ def load_balance_sheet(ticker: str) -> str:
     with duckdb.connect(DB_PATH) as con:
         rows = con.execute(
             "SELECT fiscal_year, section, line_item, value FROM balance_sheets "
-            "WHERE ticker = ? ORDER BY fiscal_year DESC, section, line_item",
+            "WHERE ticker = ? ORDER BY try_strptime(fiscal_year, '%b %d, %Y') DESC NULLS LAST, section, line_item",
             (ticker,)
         ).fetchall()
     if not rows:
@@ -337,7 +337,7 @@ def load_cash_flow(ticker: str) -> str:
         rows = con.execute(
             """SELECT fiscal_year, section, line_item, value FROM cash_flows
                WHERE ticker = ?
-               ORDER BY fiscal_year DESC,
+               ORDER BY try_strptime(fiscal_year, '%b %d, %Y') DESC NULLS LAST,
                         CASE section
                             WHEN 'Operating Activities' THEN 1
                             WHEN 'Investing Activities' THEN 2
