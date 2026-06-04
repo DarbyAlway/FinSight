@@ -1,12 +1,10 @@
-import json
-import time
-import logging
-
 from langfuse import observe
 from tools.llm import _get_client
-from agents._tooling import execute_tool
+from agents._tooling import run_tool_loop
 from tools.config import MODEL_AGENT
 from tools.balance_sheet import get_balance_sheet
+from tools.income import get_income_statement
+from tools.company import get_company_info
 from tools.ratios import (
     calculate_all_margins, calculate_debt_to_equity, calculate_roa_roe,
     calculate_current_ratio, calculate_interest_coverage,
@@ -14,6 +12,38 @@ from tools.ratios import (
 from prompts import RATIOS_SYSTEM
 
 TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_income_statement",
+            "description": (
+                "Fetch the latest 3-year annual income statement for a ticker from SEC 10-K filings. "
+                "Call this BEFORE calculate_all_margins, calculate_roa_roe, or calculate_interest_coverage "
+                "(they need revenue, net income, and operating income from this statement)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"ticker": {"type": "string"}},
+                "required": ["ticker"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_company_info",
+            "description": (
+                "Get live market context for a company: sector, industry, market cap, current price. "
+                "Use for sector/industry context when commenting on ratios. "
+                "Does NOT provide margins or balance-sheet ratios — compute those with the calculate_* tools."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"symbol": {"type": "string"}},
+                "required": ["symbol"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -108,6 +138,8 @@ TOOLS = [
 ]
 
 TOOL_FUNCTIONS = {
+    "get_income_statement": get_income_statement,
+    "get_company_info": get_company_info,
     "get_balance_sheet": get_balance_sheet,
     "calculate_all_margins": calculate_all_margins,
     "calculate_debt_to_equity": calculate_debt_to_equity,
@@ -132,71 +164,7 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
     messages.append({"role": "user", "content": user_question})
 
     client = _get_client()
-    total_prompt_tokens = 0
-    total_completion_tokens = 0
-
-    def _chat(*args, **kwargs):
-        nonlocal total_prompt_tokens, total_completion_tokens
-        r = client.chat.completions.create(*args, **kwargs)
-        if r.usage:
-            total_prompt_tokens += r.usage.prompt_tokens
-            total_completion_tokens += r.usage.completion_tokens
-        return r
-
-    response = _chat(
-        model=MODEL_AGENT,
-        messages=messages,
-        tools=TOOLS,
-        tool_choice="required",
-        temperature=OPT["temperature"],
+    return run_tool_loop(
+        "RatiosAgent", client, MODEL_AGENT, messages, TOOLS, TOOL_FUNCTIONS,
+        temperature=OPT["temperature"], expected_tickers=expected_tickers,
     )
-    msg = response.choices[0].message
-
-    while msg.tool_calls:
-        messages.append({
-            "role": "assistant",
-            "content": msg.content or "",
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-                }
-                for tc in msg.tool_calls
-            ],
-        })
-        for tool_call in msg.tool_calls:
-            name = tool_call.function.name
-            args = json.loads(tool_call.function.arguments)
-            fn = TOOL_FUNCTIONS.get(name)
-            result = execute_tool("RatiosAgent", name, args, fn)
-            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
-        response = _chat(
-            model=MODEL_AGENT,
-            messages=messages,
-            tools=TOOLS,
-            temperature=OPT["temperature"],
-        )
-        msg = response.choices[0].message
-
-    summary = msg.content or ""
-
-    if expected_tickers:
-        missing = [t for t in expected_tickers if t not in summary]
-        if missing:
-            logging.info("[RatiosAgent] self-critique: missing %s — requesting completion", missing)
-            messages.append({"role": "assistant", "content": summary})
-            messages.append({"role": "user", "content": f"Your response is missing data for: {', '.join(missing)}. Return ONLY the ## TICKER sections for these missing tickers — do not repeat tickers already covered."})
-            fix_response = _chat(
-                model=MODEL_AGENT,
-                messages=messages,
-                tools=TOOLS,
-                temperature=OPT["temperature"],
-            )
-            if fix_response.choices[0].message.content:
-                summary += "\n\n" + fix_response.choices[0].message.content
-
-    total_tokens = total_prompt_tokens + total_completion_tokens
-    logging.info("[RatiosAgent] tokens: prompt=%d completion=%d total=%d",
-                 total_prompt_tokens, total_completion_tokens, total_tokens)
-    return summary, total_tokens

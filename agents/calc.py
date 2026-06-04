@@ -1,10 +1,6 @@
-import json
-import time
-import logging
-
 from langfuse import observe
 from tools.llm import _get_client
-from agents._tooling import execute_tool
+from agents._tooling import run_tool_loop
 from tools.config import MODEL_AGENT
 from tools.calc import (
     calculate_dcf, calculate_peg, calculate_pe_vs_sector,
@@ -74,54 +70,7 @@ def run(user_question: str, context: str = "", history: list[dict] | None = None
     messages.append({"role": "user", "content": user_question})
 
     client = _get_client()
-    total_prompt_tokens = 0
-    total_completion_tokens = 0
-
-    def _chat(*args, **kwargs):
-        nonlocal total_prompt_tokens, total_completion_tokens
-        r = client.chat.completions.create(*args, **kwargs)
-        if r.usage:
-            total_prompt_tokens += r.usage.prompt_tokens
-            total_completion_tokens += r.usage.completion_tokens
-        return r
-
-    response = _chat(
-        model=MODEL_AGENT,
-        messages=messages,
-        tools=TOOLS,
-        tool_choice="required",
+    return run_tool_loop(
+        "CalcAgent", client, MODEL_AGENT, messages, TOOLS, TOOL_FUNCTIONS,
         temperature=OPT["temperature"],
     )
-    msg = response.choices[0].message
-
-    while msg.tool_calls:
-        messages.append({
-            "role": "assistant",
-            "content": msg.content or "",
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-                }
-                for tc in msg.tool_calls
-            ],
-        })
-        for tool_call in msg.tool_calls:
-            name = tool_call.function.name
-            args = json.loads(tool_call.function.arguments)
-            fn = TOOL_FUNCTIONS.get(name)
-            result = execute_tool("CalcAgent", name, args, fn)
-            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
-        response = _chat(
-            model=MODEL_AGENT,
-            messages=messages,
-            tools=TOOLS,
-            temperature=OPT["temperature"],
-        )
-        msg = response.choices[0].message
-
-    total_tokens = total_prompt_tokens + total_completion_tokens
-    logging.info("[CalcAgent] tokens: prompt=%d completion=%d total=%d",
-                 total_prompt_tokens, total_completion_tokens, total_tokens)
-    return (msg.content or ""), total_tokens
