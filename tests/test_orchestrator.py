@@ -124,6 +124,39 @@ def test_agent_failure_is_skipped_gracefully():
     assert isinstance(result, str)
 
 
+def test_gate1_overrides_planner_group_tickers():
+    """When the user names a known group, the manifest overrides the planner's
+    (unreliable) ticker expansion — the FB/BABA/missing-META-NVDA bug."""
+    from orchestrator import process_turn
+
+    # Planner emits the buggy MAG7 expansion seen live.
+    buggy = ["AAPL", "MSFT", "AMZN", "GOOGL", "FB", "BABA", "TSLA"]
+    plan_json = json.dumps({"agents": ["financials"], "tickers": buggy})
+
+    with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("done", 0)]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator.run_financials", return_value=("data", 0)) as mock_fin:
+        process_turn("analyze MAG7", [])
+
+    passed = mock_fin.call_args.kwargs["expected_tickers"]
+    assert set(passed) == {"AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA"}
+    assert "FB" not in passed and "BABA" not in passed
+
+
+def test_gate1_leaves_non_group_tickers_untouched():
+    """A query with no group mention keeps the planner's tickers as-is."""
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"agents": ["financials"], "tickers": ["AAPL"]})
+
+    with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("done", 0)]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator.run_financials", return_value=("data", 0)) as mock_fin:
+        process_turn("analyze AAPL", [])
+
+    assert mock_fin.call_args.kwargs["expected_tickers"] == ["AAPL"]
+
+
 def test_tavily_fallback_triggered_when_uncertain():
     from orchestrator import process_turn
 

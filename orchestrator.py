@@ -33,6 +33,7 @@ from agents.calc import run as run_calc
 from agents.ratios import run as run_ratios
 from prompts import PLAN_SYSTEM, SYNTHESIS_SYSTEM, TIME_SENSITIVE_KEYWORDS
 from tools.search_guardrails import is_uncertain, _web_search_with_sources
+from tools.groups import detect_group_in_query
 
 OPT_PLAN = {"temperature": 0.0}
 OPT_SYNTH = {"temperature": 0.3}
@@ -117,6 +118,17 @@ def process_turn(
         logging.warning("[Orchestrator] plan JSON malformed — using keyword fallback")
         agents_to_run = _keyword_fallback(user_input)
         logging.info("[Orchestrator] keyword fallback → agents=%s", agents_to_run)
+
+    # Gate 1 — group membership. If the user named a known group (MAG7, FAANG),
+    # the planner LLM can't be trusted to expand it (it produced FB/BABA and
+    # dropped META/NVDA), so override with the canonical manifest list.
+    group_tickers = detect_group_in_query(user_input)
+    if group_tickers:
+        if set(group_tickers) != set(tickers):
+            logging.info(
+                "[Gate1] manifest override: planner tickers=%s → %s", tickers, group_tickers
+            )
+        tickers = group_tickers
 
     accumulated_context = ""
     agent_map = {
