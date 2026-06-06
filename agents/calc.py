@@ -9,10 +9,12 @@ from tools.calc import (
     calculate_free_cash_flow, calculate_cash_runway,
 )
 from tools.price import get_price_history
-from tools.income import get_income_statement
 from tools.company import get_company_info
-from tools.cash_flow import get_cash_flow_statement
-from tools.balance_sheet import get_balance_sheet
+from tools.fetch_compact import (
+    get_income_statement_compact,
+    get_cash_flow_statement_compact,
+    get_balance_sheet_compact,
+)
 from prompts import CALC_SYSTEM as SYSTEM_PROMPT
 
 TOOLS = [
@@ -52,10 +54,13 @@ TOOLS = [
 ]
 
 TOOL_FUNCTIONS = {
+    # Fetch tools return a compact confirmation (they only populate the cache;
+    # the calculate_* tools read the numbers). Saves re-billing full statement
+    # dumps every tool round. See tools/fetch_compact.py.
     "get_company_info": get_company_info,
-    "get_income_statement": get_income_statement,
-    "get_cash_flow_statement": get_cash_flow_statement,
-    "get_balance_sheet": get_balance_sheet,
+    "get_income_statement": get_income_statement_compact,
+    "get_cash_flow_statement": get_cash_flow_statement_compact,
+    "get_balance_sheet": get_balance_sheet_compact,
     "calculate_dcf": calculate_dcf,
     "calculate_peg": calculate_peg,
     "calculate_pe_vs_sector": calculate_pe_vs_sector,

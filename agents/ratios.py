@@ -2,9 +2,11 @@ from langfuse import observe
 from tools.llm import _get_client
 from agents._tooling import run_tool_loop
 from tools.config import MODEL_AGENT
-from tools.balance_sheet import get_balance_sheet
-from tools.income import get_income_statement
 from tools.company import get_company_info
+from tools.fetch_compact import (
+    get_income_statement_compact,
+    get_balance_sheet_compact,
+)
 from tools.ratios import (
     calculate_all_margins, calculate_debt_to_equity, calculate_roa_roe,
     calculate_current_ratio, calculate_interest_coverage,
@@ -138,9 +140,11 @@ TOOLS = [
 ]
 
 TOOL_FUNCTIONS = {
-    "get_income_statement": get_income_statement,
+    # Fetch tools return a compact confirmation (cache-only; calculate_* reads the
+    # numbers) to avoid re-billing full statement dumps. See tools/fetch_compact.py.
+    "get_income_statement": get_income_statement_compact,
     "get_company_info": get_company_info,
-    "get_balance_sheet": get_balance_sheet,
+    "get_balance_sheet": get_balance_sheet_compact,
     "calculate_all_margins": calculate_all_margins,
     "calculate_debt_to_equity": calculate_debt_to_equity,
     "calculate_roa_roe": calculate_roa_roe,
