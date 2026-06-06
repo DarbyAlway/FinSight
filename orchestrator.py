@@ -69,7 +69,7 @@ def _keyword_fallback(question: str) -> list[str]:
     if any(w in q for w in ["p/e", "pe ratio", "price to earnings", "price-to-earnings", "trailing pe", "forward pe"]):
         return ["financials"]
     if any(w in q for w in ["cash flow", "cash burn", "fcf", "free cash flow", "runway"]):
-        return ["financials", "calc"]
+        return ["calc"]  # calc fetches its own SEC cash-flow data — financials no longer needed
     if any(w in q for w in ["current ratio", "interest coverage", "liquidity ratio"]):
         return ["ratios"]
     if any(w in q for w in ["price target", "target price", "analyst target"]):
