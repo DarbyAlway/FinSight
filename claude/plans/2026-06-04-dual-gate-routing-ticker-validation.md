@@ -9,7 +9,8 @@
 - **2026-06-04 — Phase A DONE** (committed `3f247ca`): shared guarded `run_tool_loop` (max-iter / duplicate-call cache / no-progress / token budget) wired into all 4 agents; ratios made self-sufficient (`get_income_statement` + `get_company_info`). Validated on SambaNova: the 85k ratios loop → ~11k. 7 new tests.
 - **2026-06-05 — Data-integrity parser fixes DONE** (committed `63d3b0f`), ahead of Phase F: (1) **fiscal-year swap** — parsers grabbed the `"X to Y"` period label instead of the column header, swapping every value's year on all 2-column statements (every balance sheet + 2-year cash flows; e.g. MSFT assets/ROE, LITE FCF trend inverted) → skip `" to "` lines in all 3 parsers; (2) **lexicographic `ORDER BY fiscal_year`** on date strings → `try_strptime(...)` across 12 queries; (3) **capex "not found"** → broadened LIKE patterns. Cache flushed for real tickers. Verified vs SEC 10-K + stockanalysis.com.
 - **2026-06-05 — calc agent self-sufficiency DONE** (pending commit): added `get_company_info` / `get_income_statement` / `get_cash_flow_statement` / `get_balance_sheet` to calc + prerequisite hints in `calculate_*` descriptions (fixes "No company info" PEG failure on a calc-only plan — see I2/I3 principle). **Decision: keep the DuckDB cache** — it's what makes per-agent self-sufficiency cheap (first fetch ~5s, cached ~50ms; duplicate fetches de-duped by cache + guardrail).
-- **Still pending:** Phase B–D (dual-gate router / ticker validation), Phase F (Pydantic parser validation + "LLM quotes tool numbers, never recomputes" — seen live: synthesis recomputed PEG 1.53 despite the tool erroring), I1/I4, and **I5** (web-search trigger, below).
+- **2026-06-06 — Phase B (Gate 1 group manifest) DONE** (pending commit): new `tools/groups.py` with `GROUP_MANIFEST` (MAG7, FAANG — minimal by design, per user; anything else → None → dynamic path), `check_local_manifest()` and `detect_group_in_query()`. Wired into `orchestrator.process_turn`: after planning, `detect_group_in_query(user_input)` overrides the planner's ticker list when a known group is named — directly fixes the FB/BABA/missing-META-NVDA bug. 12 new tests (10 `test_groups.py` + 2 `test_orchestrator.py` covering MAG7 override + normal-query passthrough). Added `pytest.ini` (`testpaths = tests`) so bare `pytest` stops collecting root `smoke_test.py` (it `sys.exit()`s at import → INTERNALERROR). Also added the **`market_news`** intent to the router taxonomy (no ticker, no group — e.g. "why is the market down today" → news agent / web search, bypasses both gates). Suite: **120 passed**.
+- **Still pending:** Phase C–D (Gate 2 SEC index + structured router), Phase F (Pydantic parser validation + "LLM quotes tool numbers, never recomputes" — seen live: synthesis recomputed PEG 1.53 despite the tool erroring), I1/I4, and **I5** (web-search trigger, below).
 
 ---
 
@@ -89,14 +90,25 @@ from pydantic import BaseModel, Field
 from typing import Literal
 
 class QueryIntent(BaseModel):
-    intent_type: Literal["specific_tickers", "macro_theme", "general_qa"] = Field(
-        description="Did the user name specific stocks, a market concept/theme, or general QA?"
+    intent_type: Literal["specific_tickers", "macro_theme", "market_news", "general_qa"] = Field(
+        description="Did the user name specific stocks, a named group/theme, ask about "
+                    "overall market conditions/news, or general QA?"
     )
     extracted_entities: list[str] = Field(
         description="Company NAMES or raw symbols the user mentioned — do NOT guess tickers."
     )
 ```
 **Critical:** the LLM extracts *entities/names* (reliable), NOT tickers (stale). Ticker resolution is owned by deterministic code.
+
+**`market_news` — the "no direct stock" intent (added 2026-06-06).** Queries like
+*"what's wrong with the stock market today, why is everything going down"* name no
+ticker and no fixed group, but DO need live data — so they're neither `specific_tickers`,
+`macro_theme` (which requires a manifest-defined membership), nor `general_qa` (greetings/
+chit-chat). They route to the **news agent** (optionally seeded with index proxies like
+`^GSPC`/`SPY`/`^IXIC`) and/or the **grounded web-search dynamic path** — they bypass both
+gates (no manifest group, no entities to resolve). This is the broad-market sibling of the
+dynamic path: `macro_theme` with no manifest hit goes to grounded search for a *ticker set*;
+`market_news` goes to news/web search for *current market explanation* (no ticker set needed).
 
 ### Router flow
 ```python
@@ -116,6 +128,11 @@ def orchestrator_router_node(user_query: str) -> dict:
         if local:
             return {"action": "execute_analysis", "tickers": local}
         return {"action": "trigger_grounded_search", "concept": intent.extracted_entities[0]}
+
+    elif intent.intent_type == "market_news":
+        # No ticker, no group — broad-market "why is everything down today".
+        # Bypass both gates; go to news agent (+ index proxies) / grounded search.
+        return {"action": "market_news"}   # -> news agent / web search, no ticker set
 
     return {"action": "fallback_chat"}   # general_qa / greeting
 ```
