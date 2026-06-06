@@ -244,6 +244,8 @@ This is the **systematic, permanent version of the manual bug-hunting done 2026-
 ## Additional issues observed 2026-06-04 (fold into next session)
 
 ### I1 — Slow responses (LITE/Lumentum query took 102s) — DIAGNOSE FIRST
+**DONE 2026-06-06 (committed `9bf2898`):** the agents' `_chat` wrapper now logs each LLM round's latency + tokens (`[Agent] llm call: Nms prompt=.. completion=..`) and logs failed calls with latency + exception (429 visibility). Unit-tested via caplog. The *diagnosis* (why agents were slow) is now possible from logs; any concurrency/rate-limit fix follows once observed.
+
 Tool executions were fast (cash-flow fetch ~6s, FCF calc 22ms, edgar init ~10s one-time) but the **financials agent took 50.75s and calc took 99.57s**. The time is in the agents' **internal LLM calls**, which use the `_chat` wrapper that does **not log latency** (only `llm_chat` does) — so it's invisible.
 - **Action: add latency logging to the agents' `_chat` wrapper** (model, prompt/completion tokens, latency) + log any `429`/rate-limit. Without this we're guessing.
 - **Prime suspects:** (1) **SambaNova throttling** under parallel agent load — 2-3 agents fire concurrent requests via ThreadPoolExecutor → RPM limit → silent client ret/backoff; (2) **calc-depends-on-financials run in parallel** (see I2). 50–99s/agent for 2 LLM calls is abnormal (normal SambaNova call ≈1–2s).
@@ -313,6 +315,8 @@ SUM   = 10,232 over 5 calls
 Estimated ~50–65% input-token reduction on the heavy agents from #1+#2. Independent of the routing work; pairs naturally with Phase F (structured data → less free-text re-sending).
 
 ### I7 — Langfuse: one trace per agent instead of one per query — added 2026-06-05
+**DONE 2026-06-06 (committed `9bf2898`):** capture the OTEL context before the `ThreadPoolExecutor` and re-attach it inside each `_run_agent` worker (with `finally: detach`). Agent spans now nest under the query's `process_turn` trace. Verify in the Langfuse UI (no unit test for cross-thread OTEL context); suite confirms no regression.
+
 In the Langfuse UI each query produces **multiple top-level rows — one per agent** (financials, calc, …) instead of a **single query trace with the agents nested inside it**. Desired: `"what is MSFT PEG?"` = one row → planner + financials + calc + synthesis as child spans.
 
 **Root cause:** agents run in a `ThreadPoolExecutor` (`_run_agent` in `orchestrator.py`). Langfuse 4.7.0 is OTEL-based, and the `@observe` decorator nests via the **OpenTelemetry context** — which is **not propagated across thread boundaries**. So each agent thread has an empty context and its `@observe` (`ratios-agent`, etc.) starts a **new root trace**. The planner/synthesis nest fine because they run on the main thread.
