@@ -53,9 +53,22 @@ def calculate_margin_trend(ticker: str) -> str:
     if not revenue_rows:
         return f"ERROR: No revenue data for {ticker} — call get_income_statement first."
 
-    rev_by_year = {r["fiscal_year"]: r["value"] for r in revenue_rows}
+    # Use the max value per year for revenue — total revenue > sub-items like
+    # "Cost of revenue", which also matches the %revenue% synonym. Without this
+    # the denominator could be a sub-item, yielding impossible >100% margins
+    # (MSFT showed 220.8%). Mirrors calculate_all_margins.
+    rev_by_year: dict[str, float] = {}
+    for r in revenue_rows:
+        fy = r["fiscal_year"]
+        if r["value"] > rev_by_year.get(fy, 0):
+            rev_by_year[fy] = r["value"]
     gross_by_year = {r["fiscal_year"]: r["value"] for r in gross_rows}
-    net_by_year = {r["fiscal_year"]: r["value"] for r in net_rows}
+    # Max absolute value per year (total net income/loss > sub-items).
+    net_by_year: dict[str, float] = {}
+    for r in net_rows:
+        fy = r["fiscal_year"]
+        if abs(r["value"]) > abs(net_by_year.get(fy, 0)):
+            net_by_year[fy] = r["value"]
 
     years = sorted(rev_by_year.keys(), key=_parse_fiscal_year, reverse=True)
     lines = [f"{ticker} Margin Trend:"]

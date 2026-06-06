@@ -88,6 +88,24 @@ def test_calculate_margin_trend_returns_table():
     assert "gross" in result.lower() or "margin" in result.lower()
 
 
+def test_calculate_margin_trend_ignores_cost_of_revenue_subitem():
+    """Regression: 'Cost of revenue' matches the %revenue% synonym, and the old
+    code kept the last-matched row as the denominator → MSFT showed a 220.8%
+    gross margin. Must divide by TOTAL revenue (the max), not the sub-item."""
+    from tools.calc import calculate_margin_trend
+    _seed_income("MARGBUG", [
+        ("Jun 30, 2025", "General", "Total revenue", 281_724.0),
+        ("Jun 30, 2025", "General", "Cost of revenue", 87_831.0),
+        ("Jun 30, 2025", "General", "Gross margin", 193_893.0),
+        ("Jun 30, 2025", "General", "Net income", 101_832.0),
+    ])
+    result = calculate_margin_trend("MARGBUG")
+    assert "281,724" in result      # denominator is total revenue, not 87,831
+    assert "220" not in result      # the impossible 220.8% gross margin is gone
+    assert "68.8%" in result        # 193,893 / 281,724
+    assert "36.1%" in result        # 101,832 / 281,724
+
+
 def test_calculate_yoy_returns_change():
     from tools.calc import calculate_yoy
     _seed_income("YOYCO", [
