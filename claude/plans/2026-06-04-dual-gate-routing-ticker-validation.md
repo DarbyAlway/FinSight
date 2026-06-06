@@ -306,7 +306,7 @@ SUM   = 10,232 over 5 calls
 **Key insight:** the data-fetch tools (`get_income_statement`, `get_balance_sheet`) dump the **full statement** into context, but in the **calc/ratios** agents those tools exist only to populate the DuckDB cache — the real numbers come from the `calculate_*` tools reading the DB. So ~1,760 tokens of statement text is carried and re-billed 3–4× for nothing.
 
 **Levers (caching ruled out), by ROI:**
-1. **Compact fetch-tool output in calc/ratios** — return a short confirmation (`"MSFT income loaded: FY2025 rev $281,724M, net $101,832M"`) instead of the full dump. Cuts ~50–60% off those agents. *Per-agent:* the **financials** agent needs the full text (it summarizes it for the user), so keep full there, slim for calc/ratios.
+1. **Compact fetch-tool output in calc/ratios** — ✅ **DONE 2026-06-06 (committed `24d47d8`)**. `tools/fetch_compact.py` wraps `get_income_statement`/`get_balance_sheet`/`get_cash_flow_statement` to return a short confirmation (cache still populated; `calculate_*` reads the numbers). Wired into calc + ratios `TOOL_FUNCTIONS`; **financials keeps the full text** (it summarizes for the user); tool schemas unchanged. Returns the original result on error/stale/parse-empty so failures stay visible. 6 unit tests, suite 138 passed. **Live MAG7 token-drop verification still pending** (paid SambaNova). Evidence trail: live `analyze Twitter`/`Square`/`MAG7` runs; 95k MAG7 turn (financials 37k + ratios 45k + news 10k).
 2. **Slim the tool schemas** — 715×5 = 35%; with no caching every schema byte is paid per round. Tighter descriptions / fewer tools per agent.
 3. **Fewer rounds** — 4 sequential tool calls = 5 re-sends; batching fetches into one round helps but the model controls it.
 
