@@ -157,6 +157,44 @@ def test_gate1_leaves_non_group_tickers_untouched():
     assert mock_fin.call_args.kwargs["expected_tickers"] == ["AAPL"]
 
 
+def test_gate2_drops_dead_ticker_and_skips_agents():
+    """A dead/unlisted ticker (TWTR) is dropped; with nothing left to analyze,
+    data agents are skipped entirely instead of burning tokens on errors."""
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"agents": ["financials", "ratios", "news"], "tickers": ["TWTR"]})
+    synthesis_text = "TWTR is no longer publicly listed."
+
+    with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), (synthesis_text, 0)]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator.validate_tickers", return_value=([], ["TWTR"])), \
+         patch("orchestrator.run_financials") as mock_fin, \
+         patch("orchestrator.run_ratios") as mock_ratios, \
+         patch("orchestrator.run_news") as mock_news:
+        result, _ = process_turn("analyze Twitter stock", [])
+
+    mock_fin.assert_not_called()
+    mock_ratios.assert_not_called()
+    mock_news.assert_not_called()
+    assert result == synthesis_text
+
+
+def test_gate2_drops_invalid_keeps_valid_tickers():
+    """When some tickers are valid and some dead, only the valid ones reach agents."""
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"agents": ["financials"], "tickers": ["AAPL", "TWTR"]})
+
+    with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("done", 0)]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator.validate_tickers", return_value=(["AAPL"], ["TWTR"])), \
+         patch("orchestrator.run_financials", return_value=("data", 0)) as mock_fin:
+        process_turn("compare AAPL and Twitter", [])
+
+    mock_fin.assert_called_once()
+    assert mock_fin.call_args.kwargs["expected_tickers"] == ["AAPL"]
+
+
 def test_tavily_fallback_triggered_when_uncertain():
     from orchestrator import process_turn
 

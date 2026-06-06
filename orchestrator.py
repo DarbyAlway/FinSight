@@ -34,6 +34,7 @@ from agents.ratios import run as run_ratios
 from prompts import PLAN_SYSTEM, SYNTHESIS_SYSTEM, TIME_SENSITIVE_KEYWORDS
 from tools.search_guardrails import is_uncertain, _web_search_with_sources
 from tools.groups import detect_group_in_query
+from tools.resolve import validate_tickers
 
 OPT_PLAN = {"temperature": 0.0}
 OPT_SYNTH = {"temperature": 0.3}
@@ -129,6 +130,23 @@ def process_turn(
                 "[Gate1] manifest override: planner tickers=%s → %s", tickers, group_tickers
             )
         tickers = group_tickers
+
+    # Gate 2 — validation. Drop tickers that aren't currently-listed SEC filers:
+    # dead/renamed (TWTR, SQ, FB) or hallucinated symbols. Catch them before
+    # dispatch so we don't spend agents fetching nothing. If every requested
+    # ticker is invalid, skip the data agents entirely and let synthesis explain
+    # cheaply (instead of burning ~17k tokens discovering a dead ticker).
+    if tickers:
+        valid_tickers, invalid_tickers = validate_tickers(tickers)
+        if invalid_tickers:
+            logging.info(
+                "[Gate2] dropped invalid/unlisted tickers %s (kept %s)",
+                invalid_tickers, valid_tickers,
+            )
+            tickers = valid_tickers
+            if not tickers:
+                logging.info("[Gate2] all requested tickers invalid — skipping data agents")
+                agents_to_run = []
 
     accumulated_context = ""
     agent_map = {
