@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .env
 eval_results.json
+tests/failure_log.jsonl
 logs/
 claude/memory/
 debug_10q.py
