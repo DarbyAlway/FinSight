@@ -1,9 +1,6 @@
 from datetime import datetime
 
-import duckdb
-
-from tools.config import DB_PATH
-from tools.db import fuzzy_query, load_ticker_info
+from tools.db import fuzzy_query, load_ticker_info, connect
 
 
 def _parse_fiscal_year(fy: str) -> datetime:
@@ -179,7 +176,7 @@ def calculate_dcf(
 
 
 def calculate_free_cash_flow(ticker: str) -> str:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         op_rows = con.execute(
             """SELECT fiscal_year, value FROM cash_flows
                WHERE ticker = ?
@@ -222,7 +219,7 @@ def calculate_free_cash_flow(ticker: str) -> str:
 
 
 def calculate_cash_runway(ticker: str) -> str:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         cash_rows = con.execute(
             """SELECT fiscal_year, value FROM balance_sheets
                WHERE ticker = ?
@@ -308,50 +305,73 @@ SECTOR_PEERS: dict[str, list[str]] = {
 }
 
 
+def _pick_valuation_multiple(info: dict) -> tuple[str, float, str] | None:
+    """Best available valuation multiple, in preference order: trailing P/E,
+    then forward P/E, then P/S. Returns (field, value, label), or None if all
+    are missing/non-positive. Unprofitable growth names (e.g. RBRK, CRWD) have
+    an N/A trailing P/E but a usable forward P/E or P/S already in the cache."""
+    for field, label in (
+        ("trailingPE", "trailing P/E"),
+        ("forwardPE", "forward P/E"),
+        ("priceToSalesTrailing12Months", "P/S"),
+    ):
+        v = info.get(field)
+        if isinstance(v, (int, float)) and v > 0:
+            return field, float(v), label
+    return None
+
+
 def calculate_pe_vs_sector(ticker: str) -> str:
     info = load_ticker_info(ticker)
     if not info:
         return f"ERROR: No company info for {ticker} — call get_company_info first."
-    pe = info.get("trailingPE")
-    if not pe or not isinstance(pe, (int, float)):
-        return f"ERROR: P/E ratio unavailable for {ticker}."
+    picked = _pick_valuation_multiple(info)
+    if not picked:
+        return f"ERROR: No trailing P/E, forward P/E, or P/S available for {ticker}."
+    field, value, label = picked
     sector = info.get("sector", "")
+    # Compare peers on the SAME multiple so the comparison is apples-to-apples.
+    note = ""
+    if field != "trailingPE":
+        note = (f"  Note: {ticker} has no trailing P/E (negligible/negative TTM "
+                f"earnings); comparing on {label} instead.")
     peers = [t for t in SECTOR_PEERS.get(sector, []) if t != ticker][:5]
     if not peers:
-        return (
-            f"{ticker} P/E: {pe:.1f} | Sector: {sector}\n"
-            f"  No peer benchmark available for sector '{sector}'."
-        )
-    peer_pes: list[float] = []
-    lines = [f"{ticker} P/E vs {sector} Sector Peers:"]
-    lines.append(f"  {ticker}: {pe:.1f} (subject)")
+        out = f"{ticker} {label}: {value:.1f} | Sector: {sector}"
+        if note:
+            out += "\n" + note
+        return out + f"\n  No peer benchmark available for sector '{sector}'."
+    peer_vals: list[float] = []
+    lines = [f"{ticker} {label} vs {sector} Sector Peers:"]
+    if note:
+        lines.append(note)
+    lines.append(f"  {ticker}: {value:.1f} (subject)")
     for peer in peers:
         peer_info = load_ticker_info(peer)
         if not peer_info:
             from tools.company import fetch_and_cache_company
             peer_info = fetch_and_cache_company(peer) or {}
-        peer_pe = peer_info.get("trailingPE")
-        if peer_pe and isinstance(peer_pe, (int, float)):
-            peer_pes.append(peer_pe)
-            lines.append(f"  {peer}: {peer_pe:.1f}")
-    if peer_pes:
-        avg_pe = sum(peer_pes) / len(peer_pes)
-        diff = pe - avg_pe
-        lines.append(f"  Peer avg P/E: {avg_pe:.1f}  |  {ticker} is {diff:+.1f} vs peers")
+        peer_val = peer_info.get(field)
+        if isinstance(peer_val, (int, float)) and peer_val > 0:
+            peer_vals.append(peer_val)
+            lines.append(f"  {peer}: {peer_val:.1f}")
+    if peer_vals:
+        avg = sum(peer_vals) / len(peer_vals)
+        diff = value - avg
+        lines.append(f"  Peer avg {label}: {avg:.1f}  |  {ticker} is {diff:+.1f} vs peers")
     return "\n".join(lines)
 
 
 def calculate_correlation(tickers: list[str], period: str = "1y") -> str:
     import pandas as pd
     from tools.price import get_price_history
-    from tools.config import DB_PATH as _DB_PATH
 
     for ticker in tickers:
         get_price_history(ticker, period, force=True)
 
     frames: dict[str, pd.Series] = {}
     for ticker in tickers:
-        with duckdb.connect(_DB_PATH) as con:
+        with connect() as con:
             rows = con.execute(
                 "SELECT date, close FROM price_history WHERE ticker = ? ORDER BY date",
                 (ticker,)

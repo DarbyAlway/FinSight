@@ -1,6 +1,8 @@
 import hashlib
 import json
+import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime
 
 import duckdb
@@ -10,9 +12,29 @@ from tools.config import DB_PATH, CACHE_TTL_DAYS, TICKER_INFO_TTL_HOURS, SYNONYM
 QUARTERLY_TTL_DAYS = 7
 EARNINGS_TTL_DAYS = 7
 
+# DuckDB allows only one writer on the database file. Agents run in parallel
+# (orchestrator ThreadPoolExecutor); when two of them each open their own
+# connection and one writes, the others crash with "Conflict on update" or
+# "file being used by another process". Serializing every connection through
+# this process-wide lock makes concurrent cache access safe. Cache ops are
+# sub-50ms, so the serialization cost is negligible. Use connect() everywhere
+# instead of duckdb.connect(DB_PATH) directly — including from other modules.
+_DB_LOCK = threading.RLock()
+
+
+@contextmanager
+def connect():
+    """Open a DuckDB connection to the shared cache under the process-wide lock."""
+    with _DB_LOCK:
+        con = duckdb.connect(DB_PATH)
+        try:
+            yield con
+        finally:
+            con.close()
+
 
 def init_db():
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         con.execute("""
             CREATE TABLE IF NOT EXISTS income_statements (
                 ticker      VARCHAR,
@@ -99,7 +121,7 @@ def init_db():
 
 
 def is_cache_fresh(ticker: str) -> bool:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         row = con.execute(
             "SELECT fetched_at FROM income_statements WHERE ticker = ? LIMIT 1",
             (ticker,)
@@ -112,7 +134,7 @@ def is_cache_fresh(ticker: str) -> bool:
 def save_to_cache(rows: list[dict]):
     if not rows:
         return
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         con.executemany(
             """INSERT OR REPLACE INTO income_statements
                (ticker, fiscal_year, section, line_item, value, fetched_at)
@@ -123,7 +145,7 @@ def save_to_cache(rows: list[dict]):
 
 
 def load_from_cache(ticker: str) -> str:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         rows = con.execute(
             "SELECT fiscal_year, section, line_item, value FROM income_statements "
             "WHERE ticker = ? ORDER BY try_strptime(fiscal_year, '%b %d, %Y') DESC NULLS LAST, section, line_item",
@@ -147,7 +169,7 @@ def fuzzy_query(ticker: str, line_item: str) -> list[dict]:
     seen: set[tuple] = set()
     results: list[dict] = []
     for pattern in patterns:
-        with duckdb.connect(DB_PATH) as con:
+        with connect() as con:
             rows = con.execute(
                 """SELECT fiscal_year, section, line_item, value
                    FROM income_statements
@@ -167,7 +189,7 @@ def fuzzy_query(ticker: str, line_item: str) -> list[dict]:
 def save_ticker_info(symbol: str, info: dict):
     summary = info.get("longBusinessSummary", "")
     summary_hash = hashlib.md5(summary.encode()).hexdigest()
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         con.execute("""
             INSERT OR REPLACE INTO ticker_info
                 (symbol, sector, industry, summary, summary_hash, info_json, cached_at)
@@ -184,7 +206,7 @@ def save_ticker_info(symbol: str, info: dict):
 
 
 def load_ticker_info(symbol: str) -> dict | None:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         row = con.execute(
             "SELECT info_json FROM ticker_info WHERE symbol = ?", (symbol,)
         ).fetchone()
@@ -194,7 +216,7 @@ def load_ticker_info(symbol: str) -> dict | None:
 
 
 def is_ticker_info_fresh(symbol: str) -> bool:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         row = con.execute(
             "SELECT cached_at FROM ticker_info WHERE symbol = ?", (symbol,)
         ).fetchone()
@@ -204,7 +226,7 @@ def is_ticker_info_fresh(symbol: str) -> bool:
 
 
 def get_summary_hash(symbol: str) -> str | None:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         row = con.execute(
             "SELECT summary_hash FROM ticker_info WHERE symbol = ?", (symbol,)
         ).fetchone()
@@ -212,7 +234,7 @@ def get_summary_hash(symbol: str) -> str | None:
 
 
 def is_quarterly_cache_fresh(ticker: str) -> bool:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         row = con.execute(
             "SELECT fetched_at FROM quarterly_statements WHERE ticker = ? ORDER BY fetched_at DESC LIMIT 1",
             (ticker,)
@@ -225,7 +247,7 @@ def is_quarterly_cache_fresh(ticker: str) -> bool:
 def save_quarterly_cache(rows: list[dict]):
     if not rows:
         return
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         con.executemany(
             """INSERT OR REPLACE INTO quarterly_statements
                (ticker, period_end, quarter_label, section, line_item, value, fetched_at)
@@ -236,7 +258,7 @@ def save_quarterly_cache(rows: list[dict]):
 
 
 def load_quarterly_cache(ticker: str) -> str:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         rows = con.execute(
             "SELECT period_end, quarter_label, section, line_item, value FROM quarterly_statements "
             "WHERE ticker = ? ORDER BY period_end DESC, section, line_item",
@@ -261,7 +283,7 @@ def load_quarterly_cache(ticker: str) -> str:
 
 
 def is_balance_sheet_fresh(ticker: str) -> bool:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         row = con.execute(
             "SELECT fetched_at FROM balance_sheets WHERE ticker = ? LIMIT 1",
             (ticker,)
@@ -274,7 +296,7 @@ def is_balance_sheet_fresh(ticker: str) -> bool:
 def save_balance_sheet(rows: list[dict]):
     if not rows:
         return
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         con.executemany(
             """INSERT OR REPLACE INTO balance_sheets
                (ticker, fiscal_year, section, line_item, value, fetched_at)
@@ -285,7 +307,7 @@ def save_balance_sheet(rows: list[dict]):
 
 
 def load_balance_sheet(ticker: str) -> str:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         rows = con.execute(
             "SELECT fiscal_year, section, line_item, value FROM balance_sheets "
             "WHERE ticker = ? ORDER BY try_strptime(fiscal_year, '%b %d, %Y') DESC NULLS LAST, section, line_item",
@@ -309,7 +331,7 @@ def load_balance_sheet(ticker: str) -> str:
 
 
 def is_cash_flow_fresh(ticker: str) -> bool:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         row = con.execute(
             "SELECT fetched_at FROM cash_flows WHERE ticker = ? LIMIT 1",
             (ticker,)
@@ -322,7 +344,7 @@ def is_cash_flow_fresh(ticker: str) -> bool:
 def save_cash_flow(rows: list[dict]):
     if not rows:
         return
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         con.executemany(
             """INSERT OR REPLACE INTO cash_flows
                (ticker, fiscal_year, section, line_item, value, fetched_at)
@@ -333,7 +355,7 @@ def save_cash_flow(rows: list[dict]):
 
 
 def load_cash_flow(ticker: str) -> str:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         rows = con.execute(
             """SELECT fiscal_year, section, line_item, value FROM cash_flows
                WHERE ticker = ?
@@ -365,7 +387,7 @@ def load_cash_flow(ticker: str) -> str:
 
 
 def is_earnings_fresh(ticker: str) -> bool:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         row = con.execute(
             "SELECT fetched_at FROM earnings_releases WHERE ticker = ? ORDER BY fetched_at DESC LIMIT 1",
             (ticker,)
@@ -378,7 +400,7 @@ def is_earnings_fresh(ticker: str) -> bool:
 def save_earnings(rows: list[dict]):
     if not rows:
         return
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         con.executemany(
             """INSERT OR REPLACE INTO earnings_releases
                (ticker, period_end, eps_actual, eps_estimate, revenue_actual,
@@ -391,7 +413,7 @@ def save_earnings(rows: list[dict]):
 
 
 def load_earnings(ticker: str) -> str:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         rows = con.execute(
             """SELECT period_end, eps_actual, eps_estimate, beat_miss,
                       revenue_actual, guidance_text

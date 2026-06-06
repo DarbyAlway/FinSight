@@ -12,6 +12,13 @@ def fetch_and_cache_company(symbol: str) -> dict | None:
     try:
         import time
         info = yf.Ticker(symbol).info # get info from "yahoo finance" we need to change to "edgar" instead
+        # A failed/blocked Yahoo fetch (e.g. a transient 404) returns a near-empty
+        # dict with no price, market cap, or name. Caching that poisons the cache
+        # with N/A values that persist until TTL and mask the real ticker — so
+        # treat it as a failure and don't save.
+        if not (info.get("currentPrice") or info.get("marketCap") or info.get("longName")):
+            logging.warning("fetch_and_cache_company: empty/blocked result for %s — not caching", symbol)
+            return None
         info["_cached_at"] = time.time()
         new_summary = info.get("longBusinessSummary", "") # store the summarize business in here
         new_hash = hashlib.md5(new_summary.encode()).hexdigest()

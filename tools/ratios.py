@@ -1,7 +1,4 @@
-import duckdb
-
-from tools.config import DB_PATH
-from tools.db import fuzzy_query
+from tools.db import fuzzy_query, connect
 
 
 def _parse_fiscal_year(fy: str):
@@ -70,7 +67,7 @@ def calculate_debt_to_equity(ticker: str) -> str:
         "%shareholders%equity%",
     ]
 
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         fy_row = con.execute(
             "SELECT fiscal_year FROM balance_sheets WHERE ticker = ? ORDER BY try_strptime(fiscal_year, '%b %d, %Y') DESC NULLS LAST LIMIT 1",
             (ticker,)
@@ -136,7 +133,7 @@ def calculate_roa_roe(ticker: str) -> str:
         if abs(r["value"]) > abs(net_by_year.get(fy, 0)):
             net_by_year[fy] = r["value"]
 
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         asset_rows = con.execute(
             "SELECT fiscal_year, value FROM balance_sheets "
             "WHERE ticker = ? AND lower(line_item) LIKE '%total assets%'",
@@ -184,7 +181,7 @@ def calculate_roa_roe(ticker: str) -> str:
 
 
 def calculate_current_ratio(ticker: str) -> str:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         fy_row = con.execute(
             "SELECT fiscal_year FROM balance_sheets WHERE ticker = ? ORDER BY try_strptime(fiscal_year, '%b %d, %Y') DESC NULLS LAST LIMIT 1",
             (ticker,)
@@ -239,7 +236,7 @@ def calculate_interest_coverage(ticker: str) -> str:
     if not ebit_rows:
         return f"ERROR: No operating income data for {ticker} — call get_income_statement first."
 
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         interest_rows = con.execute(
             """SELECT fiscal_year, value FROM income_statements
                WHERE ticker = ?

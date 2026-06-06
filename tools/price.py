@@ -1,15 +1,14 @@
 import time
 
-import duckdb
 import yfinance as yf
 
-from tools.config import DB_PATH
+from tools.db import connect
 
 PRICE_TTL_HOURS = 24
 
 
 def _is_price_fresh(ticker: str) -> bool:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         row = con.execute(
             "SELECT fetched_at FROM price_history WHERE ticker = ? LIMIT 1",
             (ticker,)
@@ -20,7 +19,7 @@ def _is_price_fresh(ticker: str) -> bool:
 
 
 def _load_price_rows(ticker: str) -> list[tuple]:
-    with duckdb.connect(DB_PATH) as con:
+    with connect() as con:
         return con.execute(
             "SELECT date, close FROM price_history WHERE ticker = ? ORDER BY date",
             (ticker,)
@@ -38,7 +37,7 @@ def get_price_history(ticker: str, period: str = "1y", force: bool = False) -> s
                 (ticker, str(date.date()), float(close), now)
                 for date, close in zip(hist.index, hist["Close"])
             ]
-            with duckdb.connect(DB_PATH) as con:
+            with connect() as con:
                 con.executemany(
                     "INSERT OR REPLACE INTO price_history "
                     "(ticker, date, close, fetched_at) VALUES (?, ?, ?, ?)",

@@ -4,7 +4,7 @@ from tools.db import init_db
 
 
 def _seed_price(ticker, rows):
-    from tools.price import DB_PATH
+    from tools.config import DB_PATH
     init_db()
     with duckdb.connect(DB_PATH) as con:
         con.executemany(
