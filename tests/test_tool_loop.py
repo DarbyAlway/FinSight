@@ -118,6 +118,18 @@ def test_token_budget_breaks_loop():
     assert tokens >= 40000
 
 
+def test_logs_per_call_latency_and_tokens(caplog):
+    """I1: each agent LLM round logs its own latency + token counts, so a slow
+    agent's time is visible instead of hidden inside the loop."""
+    import logging as _logging
+    client = _client_with([_resp(content="done", pt=12, ct=7)])
+    with caplog.at_level(_logging.INFO):
+        run_tool_loop("RatiosAgent", client, "m", [], [], {}, temperature=0.0)
+    msgs = [r.getMessage() for r in caplog.records]
+    assert any("llm call" in m and "prompt=12" in m and "completion=7" in m for m in msgs)
+    assert any("ms" in m for m in msgs if "llm call" in m)
+
+
 def test_self_critique_requests_missing_tickers():
     responses = [
         _resp(content="## AAPL\nRevenue $400B"),         # initial answer (no tools)

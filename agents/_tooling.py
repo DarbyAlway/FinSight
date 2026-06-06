@@ -70,10 +70,25 @@ def run_tool_loop(
     usage = {"prompt": 0, "completion": 0}
 
     def _chat(**kwargs):
-        r = client.chat.completions.create(**kwargs)
+        # I1: log each LLM round's latency + tokens so a slow agent is visible
+        # (the per-agent total hides which round was slow / rate-limited).
+        t0 = time.perf_counter()
+        try:
+            r = client.chat.completions.create(**kwargs)
+        except Exception as e:
+            dur = round((time.perf_counter() - t0) * 1000)
+            logging.warning("[%s] llm call FAILED after %dms: %s", agent_tag, dur, e)
+            raise
+        dur = round((time.perf_counter() - t0) * 1000)
         if r.usage:
             usage["prompt"] += r.usage.prompt_tokens
             usage["completion"] += r.usage.completion_tokens
+            logging.info(
+                "[%s] llm call: %dms prompt=%d completion=%d",
+                agent_tag, dur, r.usage.prompt_tokens, r.usage.completion_tokens,
+            )
+        else:
+            logging.info("[%s] llm call: %dms (no usage)", agent_tag, dur)
         return r
 
     response = _chat(

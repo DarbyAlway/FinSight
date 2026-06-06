@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 
 from langfuse import observe
+from opentelemetry import context as otel_context
 
 import ollama
 
@@ -159,21 +160,32 @@ def process_turn(
     ticker_hint = f"[Use exactly these tickers: {', '.join(tickers)}]\n" if tickers else ""
     agent_input = ticker_hint + user_input
 
+    # I7: agents run in worker threads, but Langfuse (OTEL) nests spans via the
+    # OpenTelemetry context, which does NOT cross thread boundaries — so each
+    # agent's @observe would start a NEW root trace (one Langfuse row per agent).
+    # Capture the current context here and re-attach it inside each worker so all
+    # agent spans nest under this query's process_turn trace (one row).
+    parent_ctx = otel_context.get_current()
+
     def _run_agent(agent_name: str):
-        fn = agent_map.get(agent_name)
-        if fn is None:
-            logging.warning("[Orchestrator] unknown agent '%s' — skipping", agent_name)
-            return agent_name, None, 0
+        ctx_token = otel_context.attach(parent_ctx)
         try:
-            logging.info("[Orchestrator] → calling agent: %s", agent_name)
-            t1 = time.time()
-            result, agent_tokens = fn(agent_input, "", history=messages, expected_tickers=tickers if tickers else None)
-            logging.info("[Orchestrator] ✓ agent %s done (%.2fs)", agent_name, time.time() - t1)
-            return agent_name, result, agent_tokens
-        except Exception as e:
-            logging.warning("[Orchestrator] %s agent failed — %s", agent_name, e)
-            _log_agent_error(agent_name, e)
-            return agent_name, None, 0
+            fn = agent_map.get(agent_name)
+            if fn is None:
+                logging.warning("[Orchestrator] unknown agent '%s' — skipping", agent_name)
+                return agent_name, None, 0
+            try:
+                logging.info("[Orchestrator] → calling agent: %s", agent_name)
+                t1 = time.time()
+                result, agent_tokens = fn(agent_input, "", history=messages, expected_tickers=tickers if tickers else None)
+                logging.info("[Orchestrator] ✓ agent %s done (%.2fs)", agent_name, time.time() - t1)
+                return agent_name, result, agent_tokens
+            except Exception as e:
+                logging.warning("[Orchestrator] %s agent failed — %s", agent_name, e)
+                _log_agent_error(agent_name, e)
+                return agent_name, None, 0
+        finally:
+            otel_context.detach(ctx_token)
 
     agent_tokens_total = 0
     with ThreadPoolExecutor() as executor:
