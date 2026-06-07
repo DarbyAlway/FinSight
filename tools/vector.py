@@ -145,3 +145,18 @@ def search_company_profiles(client: QdrantClient, query: str, top_k: int = 5) ->
         limit=top_k,
     )
     return [r.payload for r in results.points]
+
+
+def search_company_profiles_scored(client: QdrantClient, query: str, top_k: int = 3) -> list[tuple[dict, float]]:
+    """Like search_company_profiles but returns (payload, similarity_score) so the
+    caller can gate by confidence — essential for the resolver's semantic tier,
+    which must refuse rather than silently return a low-confidence nearest match."""
+    dense_enc, _ = _get_encoders()
+    q_vec = list(dense_enc.embed([query]))[0].tolist()
+    results = client.query_points(
+        collection_name=COMPANY_PROFILES_COLLECTION,
+        query=q_vec,
+        using="dense",
+        limit=top_k,
+    )
+    return [(r.payload, r.score) for r in results.points]
