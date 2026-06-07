@@ -1,6 +1,8 @@
+import logging
 from datetime import datetime
 
 from tools.db import fuzzy_query, load_ticker_info, connect
+from tools.schemas import MarginRow
 
 
 def _parse_fiscal_year(fy: str) -> datetime:
@@ -78,6 +80,17 @@ def calculate_margin_trend(ticker: str) -> str:
         rev = rev_by_year[fy]
         gross_pct = gross_by_year.get(fy, 0) / rev if rev else 0
         net_pct = net_by_year.get(fy, 0) / rev if rev else 0
+        # Phase F guard: drop a year whose margins are impossible (e.g. a >100%
+        # gross margin from a bad denominator) rather than print garbage.
+        try:
+            MarginRow(
+                fiscal_year=fy, revenue=rev,
+                gross_margin_pct=gross_pct if fy in gross_by_year else None,
+                net_margin_pct=net_pct if fy in net_by_year else None,
+            )
+        except Exception as e:
+            logging.warning("calc: skipping bad margin row %s %s: %s", ticker, fy, e)
+            continue
         lines.append(f"  {fy:<14} ${rev:>10,.0f}M {gross_pct:>8.1%} {net_pct:>8.1%}")
     return "\n".join(lines)
 

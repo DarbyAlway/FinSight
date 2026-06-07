@@ -1,4 +1,7 @@
+import logging
+
 from tools.db import fuzzy_query, connect
+from tools.schemas import MarginRow
 
 
 def _parse_fiscal_year(fy: str):
@@ -47,6 +50,16 @@ def calculate_all_margins(ticker: str) -> str:
         gross_pct = gross_by_year.get(fy, 0) / rev
         op_pct = op_by_year.get(fy, 0) / rev if fy in op_by_year else None
         net_pct = net_by_year.get(fy, 0) / rev if fy in net_by_year else None
+        # Phase F guard: skip a year with impossible/inconsistent margins
+        # (>100% gross, or operating margin above gross — a row mismatch).
+        try:
+            MarginRow(
+                fiscal_year=fy, revenue=rev, gross_margin_pct=gross_pct,
+                operating_margin_pct=op_pct, net_margin_pct=net_pct,
+            )
+        except Exception as e:
+            logging.warning("ratios: skipping bad margin row %s %s: %s", ticker, fy, e)
+            continue
         op_str = f"{op_pct:>8.1%}" if op_pct is not None else "     N/A"
         net_str = f"{net_pct:>8.1%}" if net_pct is not None else "     N/A"
         lines.append(f"  {fy:<14} ${rev:>10,.0f}M {gross_pct:>8.1%} {op_str} {net_str}")

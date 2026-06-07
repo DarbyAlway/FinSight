@@ -5,6 +5,7 @@ import time
 from edgar import Company
 
 from tools.db import is_balance_sheet_fresh, save_balance_sheet, load_balance_sheet
+from tools.schemas import validate_rows, check_balance_sheet_identity
 
 
 def _unit_multiplier(raw: str) -> float:
@@ -84,6 +85,8 @@ def parse_balance_sheet(ticker: str, raw: str) -> list[dict]:
                 "fetched_at": now,
             })
 
+    rows = validate_rows(rows, context=f"balance {ticker}")
+    check_balance_sheet_identity(rows)  # warn-only: flags a sheet that doesn't balance
     return rows
 
 

@@ -106,6 +106,25 @@ def test_calculate_margin_trend_ignores_cost_of_revenue_subitem():
     assert "36.1%" in result        # 101,832 / 281,724
 
 
+def test_calculate_margin_trend_real_msft_no_impossible_margin():
+    """Real SEC data end-to-end: the 220.8% gross-margin bug must be gone, and
+    the denominator must be MSFT's real total revenue (281,724), not a sub-item."""
+    import pytest
+    try:
+        from edgar import set_identity
+        set_identity("research test@example.com")  # SEC requires a User-Agent identity
+        from tools.income import get_income_statement
+        get_income_statement("MSFT")  # fetch + parse + cache real SEC data
+    except Exception as e:
+        pytest.skip(f"edgar/network unavailable: {e}")
+
+    from tools.calc import calculate_margin_trend
+    result = calculate_margin_trend("MSFT")
+    assert "281,724" in result   # real FY2025 total revenue as denominator
+    assert "220" not in result   # the impossible 220.8% gross margin is gone
+    assert "68.8%" in result     # 193,893 / 281,724
+
+
 def test_calculate_yoy_returns_change():
     from tools.calc import calculate_yoy
     _seed_income("YOYCO", [

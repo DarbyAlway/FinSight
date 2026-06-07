@@ -8,6 +8,7 @@ from tools.db import (
     is_cache_fresh, load_from_cache, save_to_cache,
     is_quarterly_cache_fresh, save_quarterly_cache, load_quarterly_cache,
 )
+from tools.schemas import validate_rows
 
 
 def _unit_multiplier(raw: str) -> float:
@@ -84,7 +85,7 @@ def parse_income_statement(ticker: str, raw: str) -> list[dict]:
                 "value": values[i], "fetched_at": now,
             })
 
-    return rows
+    return validate_rows(rows, context=f"income {ticker}")
 
 
 def parse_quarterly_statement(ticker: str, raw: str, period_end: str) -> list[dict]:

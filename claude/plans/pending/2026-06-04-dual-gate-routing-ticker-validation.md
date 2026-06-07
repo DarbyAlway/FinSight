@@ -222,6 +222,20 @@ Bad tickers are caught **before** agent dispatch, so we never spend 3 agents fet
 
 ## Phase F — Data integrity: Pydantic-validated parsers (new workstream)
 
+**✅ DONE 2026-06-07.** `tools/schemas.py`: `StatementRow` (finite value, magnitude/
+unit-scale ceiling, non-empty fields) + `validate_rows` wired into all three parsers
+(`income.py`, `balance_sheet.py`, `cash_flow.py`); `MarginRow` (revenue>0, gross ≤ 100%,
+operating ≤ gross; deliberately NO net/operating floor so real loss-makers aren't
+rejected) wired into `calc.calculate_margin_trend` + `ratios.calculate_all_margins`;
+`check_balance_sheet_identity` (Assets = Liabilities + Equity via robust grand-total line
+that includes mezzanine/redeemable preferred + NCI; two-bucket fallback skips rather than
+false-flags) wired into `balance_sheet.py` (warn-only). TDD: `tests/test_schemas.py` (22),
+real-data integration tests `tests/test_income.py`, `tests/test_balance.py`, and a real
+MSFT margin regression in `tests/test_calc.py`. **Verified against ~21 real filings**
+(pre-revenue startups, deep losses, negative equity, mezzanine/NCI, banks, REITs, ADR,
+biotech): zero realistic rows dropped, zero margin false-rejects. Stretch items #13/#14
+(structured data through to synthesis; post-validate synthesis prose) NOT done — deferred.
+
 **Principle (same as tickers): the LLM should never *type* a number.** Numbers flow through validated structured models; the LLM decides *what to fetch* and writes prose *around* the numbers — it never re-enters them.
 
 **Context:** in our architecture the **Python parsers** (`parse_income_statement`, `parse_quarterly_statement`, `parse_balance_sheet`, `parse_cash_flow`) already extract numbers from SEC text — the LLM only summarizes. Every data bug fixed manually this session was an *unvalidated parser* bug: `383` stored as millions (meant `383,000`, the unit-multiplier bug), `204.6%` gross margin, YTD figures mislabeled as single-quarter, FCF "capex not found". Pydantic validation would have caught all of them **at parse time, automatically.**

@@ -5,6 +5,7 @@ import time
 from edgar import Company
 
 from tools.db import is_cash_flow_fresh, save_cash_flow, load_cash_flow
+from tools.schemas import validate_rows
 
 
 def _unit_multiplier(raw: str) -> float:
@@ -88,7 +89,7 @@ def parse_cash_flow(ticker: str, raw: str) -> list[dict]:
                 "fetched_at": now,
             })
 
-    return rows
+    return validate_rows(rows, context=f"cashflow {ticker}")
 
 
 def get_cash_flow_statement(ticker: str) -> str:
