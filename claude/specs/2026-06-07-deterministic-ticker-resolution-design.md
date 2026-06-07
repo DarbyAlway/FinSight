@@ -2,7 +2,14 @@
 
 **Date:** 2026-06-07
 **Branch:** `feature/sambanova`
-**Status:** Design — pending user review
+**Status:** Deterministic core BUILT 2026-06-08 (commits 688a653, b2e0579). `tools/ticker_db.py`
+(SEC+NASDAQ table, 16,687 tickers / 5,329 ETFs), `tools/ner.py` (GLiNER, threshold 0.3),
+`tools/resolve.py` ladder (tier-0 raw-ticker, exact, alias, token_set fuzzy, ambiguous→refuse,
+gated semantic). Verified end-to-end vs edge cases (typos, raw tickers, finance abbrevs,
+renames, chitchat); Square→XYZ never VSQTF. **Deferred to the LangGraph migration:** wiring
+`resolve_query` into the orchestrator (replacing Gate 1/2), the confirm tier for AMBIGUOUS
+(Toyota/Ford/JPMorgan), `ticker_db.ensure_built()` at startup, and company-profile seeding
+for the semantic tier.
 **Supersedes:** Phase D (LLM name extraction) and Gate 2 (`tools/resolve.py` validation) of `claude/plans/2026-06-04-dual-gate-routing-ticker-validation.md`
 
 ## Problem
