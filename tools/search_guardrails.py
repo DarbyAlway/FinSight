@@ -8,6 +8,36 @@ try:
 except ImportError:
     TavilyClient = None
 
+# Reactive web-search trigger (I5): an output counts as "no data" when every
+# non-blank, non-header line begins with an error/no-data marker. Markdown
+# headers (## TICKER) are ignored so an "## AAPL\nERROR: ..." block still reads
+# as no-data. If ALL agent outputs are no-data (or none returned), fire the
+# web-search fallback.
+_NO_DATA_PREFIXES = (
+    "error", "tool_error", "no ", "could not", "unable", "unknown tool", "i don't",
+)
+
+
+def _is_no_data(text) -> bool:
+    if not isinstance(text, str) or not text.strip():
+        return True
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if not line.lower().startswith(_NO_DATA_PREFIXES):
+            return False  # a real content line → this output has data
+    return True
+
+
+def agents_returned_nothing(agent_results: dict) -> bool:
+    """True if no agent produced usable output: the dict is empty (every agent
+    failed/returned None) or every output is entirely no-data/error lines."""
+    if not agent_results:
+        return True
+    return all(_is_no_data(v) for v in agent_results.values())
+
+
 _UNCERTAIN_ANCHORS = [
     "I don't have sufficient data to answer this.",
     "I don't know the answer to that.",
