@@ -104,6 +104,7 @@ def process_turn(
     ]
     t0 = time.time()
     tickers: list[str] = []
+    intent: str | None = None
     # Always let the planner LLM classify chat vs. financial — it returns
     # agents=[] for greetings and agents=[...] for real requests. (Replaces a
     # brittle keyword heuristic that misread "analyze rocket lab" as chitchat.)
@@ -115,7 +116,8 @@ def process_turn(
         agents_to_run: list[str] = plan.get("agents", [])
         tickers = plan.get("tickers", [])
         reason = plan.get("reason", "")
-        logging.info("[Orchestrator] plan → agents=%s  tickers=%s  reason=%s", agents_to_run, tickers, reason)
+        intent = plan.get("intent")
+        logging.info("[Orchestrator] plan → intent=%s agents=%s  tickers=%s  reason=%s", intent, agents_to_run, tickers, reason)
     except (json.JSONDecodeError, ValueError):
         logging.warning("[Orchestrator] plan JSON malformed — using keyword fallback")
         agents_to_run = _keyword_fallback(user_input)
@@ -202,6 +204,16 @@ def process_turn(
         if name in agent_results:
             accumulated_context += f"\n\n[{name.upper()} AGENT]\n{agent_results[name]}"
 
+    # I5 proactive: market_news queries need live web data the local cache
+    # cannot provide ("why is the market down today"). Search up front and feed
+    # the results into synthesis as a source block.
+    proactive_web_urls: list[str] = []
+    if intent == "market_news":
+        web_snippets, proactive_web_urls = _web_search_with_sources(user_input)
+        if web_snippets:
+            accumulated_context += f"\n\n[WEB SEARCH RESULTS]\n{web_snippets}"
+            logging.info("[Orchestrator] market_news → proactive web search (%d sources)", len(proactive_web_urls))
+
     synthesis_system = synth_sys
     synthesis_messages = [{"role": "system", "content": synthesis_system}, *messages]
     if accumulated_context:
@@ -221,7 +233,10 @@ def process_turn(
     logging.info("[Synthesis] model=%s agents_context=%d chars", MODEL_SYNTHESIS, len(accumulated_context))
     answer, synth_tokens = _synthesis_step(synthesis_messages)
     logging.info("[Synthesis] output preview: %s", answer[:120].replace("\n", " "))
-    if agents_to_run and is_uncertain(answer, threshold=0.85):
+    if intent == "market_news":
+        if proactive_web_urls:
+            answer += "\n\n**Web sources:**\n" + "\n".join(f"- {url}" for url in proactive_web_urls)
+    elif agents_to_run and is_uncertain(answer, threshold=0.85):
         snippets, urls = _web_search_with_sources(user_input)
         if snippets:
             web_messages = synthesis_messages + [{

@@ -244,3 +244,50 @@ def test_tavily_fallback_skipped_when_empty_results():
 
     assert result == uncertain_answer
     assert "Web sources" not in result
+
+
+def test_market_news_intent_triggers_proactive_web_search():
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"intent": "market_news", "agents": ["news"], "tickers": []})
+
+    with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("Markets fell on rate fears.", 0)]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator._web_search_with_sources",
+               return_value=("S&P fell 2% on rate fears per Reuters.", ["https://reuters.com/mkt"])) as mock_search, \
+         patch("orchestrator.run_news", return_value=("Headlines: tech slid", 0)):
+        result, _ = process_turn("why is the market down today?", [])
+
+    mock_search.assert_called_once()
+    assert "https://reuters.com/mkt" in result
+    assert "Web sources" in result
+
+
+def test_specific_tickers_intent_no_proactive_search():
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"intent": "specific_tickers", "agents": ["financials"], "tickers": ["AAPL"]})
+    mock_search = MagicMock()
+
+    with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("AAPL P/E is 28x.", 0)]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator._web_search_with_sources", mock_search), \
+         patch("orchestrator.run_financials", return_value=("## AAPL\nP/E: 28x", 0)):
+        process_turn("what is AAPL P/E?", [])
+
+    mock_search.assert_not_called()
+
+
+def test_missing_intent_defaults_to_no_proactive_search():
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"agents": ["financials"], "tickers": ["AAPL"]})  # no intent key
+    mock_search = MagicMock()
+
+    with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("AAPL revenue $391B.", 0)]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator._web_search_with_sources", mock_search), \
+         patch("orchestrator.run_financials", return_value=("## AAPL\nRevenue: $391B", 0)):
+        process_turn("AAPL revenue?", [])
+
+    mock_search.assert_not_called()

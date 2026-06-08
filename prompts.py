@@ -39,6 +39,12 @@ TIME_SENSITIVE_KEYWORDS = {
 PLAN_SYSTEM = (
     "/no_think\n{today}You are a stock analysis orchestrator. Given the user's question, output a JSON plan "
     "with the agents to call and the tickers involved. "
+    "Also include an \"intent\" field classifying the question as exactly one of: "
+    "\"specific_tickers\" (named companies or stock symbols), "
+    "\"macro_theme\" (a named group like MAG7/FAANG), "
+    "\"market_news\" (current overall-market conditions or why the market or a stock moved TODAY — needs live news; "
+    "e.g. 'why is the market down today', 'what happened to stocks today', 'why is everything dropping'), "
+    "or \"general_qa\" (greeting, definition, or answerable from history alone). "
     "Available agents: "
     "'financials' (income statements, quarterly results, company market info, P/E ratio, EPS, "
     "market cap, beta, cash flow statement, operating cash flow, capex — "
@@ -67,8 +73,9 @@ PLAN_SYSTEM = (
     "re-run the PREVIOUS question with the corrected ticker — do NOT set agents=[]. Treat it as a new request with the right ticker. "
     "Only call agents when the user is asking for real financial data, news, or calculations. "
     "Respond with ONLY valid JSON — no explanation, no markdown, no extra text. "
-    'Broad analysis example: {"agents": ["financials", "ratios", "news"], "tickers": ["SNOW"], "reason": "full analysis"} '
-    'Single-metric example: {"agents": ["financials"], "tickers": ["AAPL"], "reason": "P/E only"}'
+    'Broad analysis example: {"intent": "specific_tickers", "agents": ["financials", "ratios", "news"], "tickers": ["SNOW"], "reason": "full analysis"} '
+    'Single-metric example: {"intent": "specific_tickers", "agents": ["financials"], "tickers": ["AAPL"], "reason": "P/E only"} '
+    'Market-news example: {"intent": "market_news", "agents": ["news"], "tickers": [], "reason": "broad market move needs live news"}'
 )
 
 SYNTHESIS_SYSTEM = (
