@@ -291,3 +291,39 @@ def test_missing_intent_defaults_to_no_proactive_search():
         process_turn("AAPL revenue?", [])
 
     mock_search.assert_not_called()
+
+
+def test_reactive_fallback_when_all_agents_return_no_data():
+    """is_uncertain is False, but every agent output is an error → fire fallback."""
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"intent": "specific_tickers", "agents": ["financials"], "tickers": ["LITE"]})
+
+    with patch("orchestrator.llm_chat", side_effect=[
+        (plan_json, 0),
+        ("There is no information available.", 0),
+        ("LITE PEG is 1.2 based on web data.", 0),
+    ]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator._web_search_with_sources",
+               return_value=("LITE PEG 1.2 per Reuters.", ["https://r.com/lite"])), \
+         patch("orchestrator.run_financials", return_value=("## LITE\nERROR: No company info for LITE", 0)):
+        result, _ = process_turn("what about LITE PEG?", [])
+
+    assert "https://r.com/lite" in result
+
+
+def test_reactive_fallback_not_fired_on_real_data():
+    """Real agent data + confident answer → no web search (no false-firing)."""
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"intent": "specific_tickers", "agents": ["financials"], "tickers": ["AAPL"]})
+    mock_search = MagicMock()
+
+    with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("AAPL revenue was $391B.", 0)]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator._web_search_with_sources", mock_search), \
+         patch("orchestrator.run_financials", return_value=("## AAPL\nRevenue: $391,035M", 0)):
+        process_turn("AAPL revenue?", [])
+
+    mock_search.assert_not_called()

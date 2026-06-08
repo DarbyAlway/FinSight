@@ -33,7 +33,7 @@ from agents.news import run as run_news
 from agents.calc import run as run_calc
 from agents.ratios import run as run_ratios
 from prompts import PLAN_SYSTEM, SYNTHESIS_SYSTEM, TIME_SENSITIVE_KEYWORDS
-from tools.search_guardrails import is_uncertain, _web_search_with_sources
+from tools.search_guardrails import is_uncertain, _web_search_with_sources, agents_returned_nothing
 from tools.groups import detect_group_in_query
 from tools.resolve import validate_tickers
 
@@ -236,7 +236,7 @@ def process_turn(
     if intent == "market_news":
         if proactive_web_urls:
             answer += "\n\n**Web sources:**\n" + "\n".join(f"- {url}" for url in proactive_web_urls)
-    elif agents_to_run and is_uncertain(answer, threshold=0.85):
+    elif agents_to_run and (agents_returned_nothing(agent_results) or is_uncertain(answer, threshold=0.85)):
         snippets, urls = _web_search_with_sources(user_input)
         if snippets:
             web_messages = synthesis_messages + [{
