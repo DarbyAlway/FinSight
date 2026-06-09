@@ -53,7 +53,7 @@ def run_tool_loop(
     max_iterations: int = _MAX_ITERATIONS,
     token_budget: int = _TOKEN_BUDGET,
     expected_tickers: list[str] | None = None,
-) -> tuple[str, int]:
+) -> tuple[str, int, dict]:
     """Run an agent's tool-calling loop with layered guardrails.
     also this is a loggin for tools loop function
     Guardrails (cheapest/earliest first) — each logs a warning when it trips:
@@ -65,7 +65,9 @@ def run_tool_loop(
     On any guardrail trip the loop forces one final, tool-free answer from the
     data already gathered (so we degrade gracefully instead of erroring out).
 
-    Returns ``(answer_text, total_tokens)``.
+    Returns ``(answer_text, total_tokens, tool_blocks)`` where ``tool_blocks``
+    is a ``dict[str, str]`` mapping ``"name(args_json)"`` to each tool's raw
+    result (already capped at 3000 chars by ``execute_tool``).
     """
     usage = {"prompt": 0, "completion": 0}
 
@@ -179,7 +181,12 @@ def run_tool_loop(
             if fix.choices[0].message.content:
                 summary += "\n\n" + fix.choices[0].message.content
 
+    tool_blocks = {
+        f"{name}({args_json})": result
+        for (name, args_json), result in seen.items()
+        if isinstance(result, str)
+    }
     total = usage["prompt"] + usage["completion"]
     logging.info("[%s] tokens: prompt=%d completion=%d total=%d",
                  agent_tag, usage["prompt"], usage["completion"], total)
-    return summary, total
+    return summary, total, tool_blocks

@@ -34,7 +34,7 @@ def _client_with(responses):
 
 def test_returns_content_when_no_tools():
     client = _client_with([_resp(content="done")])
-    out, tokens = run_tool_loop("T", client, "m", [], [], {}, temperature=0.0)
+    out, tokens, _ = run_tool_loop("T", client, "m", [], [], {}, temperature=0.0)
     assert out == "done"
     assert tokens == 15
 
@@ -46,7 +46,7 @@ def test_executes_tool_then_returns_final():
         _resp(content="AAPL revenue is $400B"),
     ]
     client = _client_with(responses)
-    out, _ = run_tool_loop("T", client, "m", [], [], {"get_x": fn}, temperature=0.0)
+    out, _, _ = run_tool_loop("T", client, "m", [], [], {"get_x": fn}, temperature=0.0)
     assert out == "AAPL revenue is $400B"
     fn.assert_called_once_with(ticker="AAPL")
 
@@ -64,7 +64,7 @@ def test_duplicate_call_is_served_from_cache():
         _resp(content="final"),
     ]
     client = _client_with(responses)
-    out, _ = run_tool_loop("T", client, "m", [], [], {"get_x": fn}, temperature=0.0)
+    out, _, _ = run_tool_loop("T", client, "m", [], [], {"get_x": fn}, temperature=0.0)
     assert out == "final"
     assert calls["n"] == 1  # second identical call never re-executed
 
@@ -76,7 +76,7 @@ def test_max_iterations_cap_stops_runaway_loop():
 
     client = MagicMock()
     client.chat.completions.create.side_effect = make
-    out, _ = run_tool_loop(
+    out, _, _ = run_tool_loop(
         "T", client, "m", [], [], {"get_x": lambda ticker: "ok"},
         temperature=0.0, max_iterations=3,
     )
@@ -94,7 +94,7 @@ def test_repeated_errors_break_before_cap():
 
     client = MagicMock()
     client.chat.completions.create.side_effect = make
-    out, _ = run_tool_loop(
+    out, _, _ = run_tool_loop(
         "T", client, "m", [], [], {"get_x": lambda ticker: "ERROR: no data"},
         temperature=0.0, max_iterations=8,
     )
@@ -109,7 +109,7 @@ def test_token_budget_breaks_loop():
 
     client = MagicMock()
     client.chat.completions.create.side_effect = make
-    out, tokens = run_tool_loop(
+    out, tokens, _ = run_tool_loop(
         "T", client, "m", [], [], {"get_x": lambda ticker: "ok"},
         temperature=0.0, token_budget=30000, max_iterations=99,
     )
@@ -136,8 +136,28 @@ def test_self_critique_requests_missing_tickers():
         _resp(content="## MSFT\nRevenue $210B"),          # self-critique completion
     ]
     client = _client_with(responses)
-    out, _ = run_tool_loop(
+    out, _, _ = run_tool_loop(
         "T", client, "m", [], [], {}, temperature=0.0,
         expected_tickers=["AAPL", "MSFT"],
     )
     assert "AAPL" in out and "MSFT" in out
+
+
+def test_tool_loop_returns_tool_blocks():
+    """run_tool_loop must return a 3-tuple; tool_blocks maps 'name(args_json)' to result."""
+    fn = MagicMock(return_value="Revenue: $400B")
+    responses = [
+        _resp(content=None, tool_calls=[_tool_call("get_financials", {"ticker": "AAPL"})]),
+        _resp(content="AAPL revenue is $400B"),
+    ]
+    client = _client_with(responses)
+    out, tokens, tool_blocks = run_tool_loop(
+        "T", client, "m", [], [], {"get_financials": fn}, temperature=0.0
+    )
+    assert out == "AAPL revenue is $400B"
+    assert isinstance(tool_blocks, dict)
+    # There should be exactly one entry: the get_financials call
+    assert len(tool_blocks) == 1
+    key = list(tool_blocks.keys())[0]
+    assert "get_financials" in key
+    assert tool_blocks[key] == "Revenue: $400B"
