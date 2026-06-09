@@ -59,7 +59,7 @@ def test_single_agent_plan_calls_correct_agent():
 
     with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("AAPL revenue is $400B.", 0)]), \
          patch("orchestrator.is_uncertain", return_value=False), \
-         patch("orchestrator.run_financials", return_value=("Revenue: $400B", 0)) as mock_fin, \
+         patch("orchestrator.run_financials", return_value=("Revenue: $400B", 0, {})) as mock_fin, \
          patch("orchestrator.run_news") as mock_news, \
          patch("orchestrator.run_calc") as mock_calc:
 
@@ -78,8 +78,8 @@ def test_multi_agent_both_called_in_parallel():
 
     with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("AAPL DCF: $195/share", 0)]), \
          patch("orchestrator.is_uncertain", return_value=False), \
-         patch("orchestrator.run_financials", return_value=("AAPL operating income: $120B", 0)) as mock_fin, \
-         patch("orchestrator.run_calc", return_value=("DCF: $195/share", 0)) as mock_calc:
+         patch("orchestrator.run_financials", return_value=("AAPL operating income: $120B", 0, {})) as mock_fin, \
+         patch("orchestrator.run_calc", return_value=("DCF: $195/share", 0, {})) as mock_calc:
 
         result, _ = process_turn("Calculate AAPL DCF", [])
 
@@ -100,7 +100,7 @@ def test_malformed_plan_uses_keyword_fallback():
     ]), \
          patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator.run_financials") as mock_fin, \
-         patch("orchestrator.run_news", return_value=("Headline: Apple up 2%", 0)) as mock_news, \
+         patch("orchestrator.run_news", return_value=("Headline: Apple up 2%", 0, {})) as mock_news, \
          patch("orchestrator.run_calc") as mock_calc:
 
         process_turn("latest news on AAPL", [])
@@ -117,7 +117,7 @@ def test_agent_failure_is_skipped_gracefully():
     with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("Here is what I found.", 0)]), \
          patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator.run_financials", side_effect=Exception("timeout")), \
-         patch("orchestrator.run_news", return_value=("Apple up 2%", 0)):
+         patch("orchestrator.run_news", return_value=("Apple up 2%", 0, {})):
 
         result, _ = process_turn("AAPL news and financials", [])
 
@@ -135,7 +135,7 @@ def test_gate1_overrides_planner_group_tickers():
 
     with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("done", 0)]), \
          patch("orchestrator.is_uncertain", return_value=False), \
-         patch("orchestrator.run_financials", return_value=("data", 0)) as mock_fin:
+         patch("orchestrator.run_financials", return_value=("data", 0, {})) as mock_fin:
         process_turn("analyze MAG7", [])
 
     passed = mock_fin.call_args.kwargs["expected_tickers"]
@@ -151,7 +151,7 @@ def test_gate1_leaves_non_group_tickers_untouched():
 
     with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("done", 0)]), \
          patch("orchestrator.is_uncertain", return_value=False), \
-         patch("orchestrator.run_financials", return_value=("data", 0)) as mock_fin:
+         patch("orchestrator.run_financials", return_value=("data", 0, {})) as mock_fin:
         process_turn("analyze AAPL", [])
 
     assert mock_fin.call_args.kwargs["expected_tickers"] == ["AAPL"]
@@ -188,7 +188,7 @@ def test_gate2_drops_invalid_keeps_valid_tickers():
     with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("done", 0)]), \
          patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator.validate_tickers", return_value=(["AAPL"], ["TWTR"])), \
-         patch("orchestrator.run_financials", return_value=("data", 0)) as mock_fin:
+         patch("orchestrator.run_financials", return_value=("data", 0, {})) as mock_fin:
         process_turn("compare AAPL and Twitter", [])
 
     mock_fin.assert_called_once()
@@ -206,7 +206,7 @@ def test_tavily_fallback_triggered_when_uncertain():
          patch("orchestrator.is_uncertain", return_value=True), \
          patch("orchestrator._web_search_with_sources",
                return_value=("Apple revenue was $94B per Reuters.", ["https://reuters.com/aapl"])), \
-         patch("orchestrator.run_financials", return_value=("Revenue: $391B", 0)):
+         patch("orchestrator.run_financials", return_value=("Revenue: $391B", 0, {})):
         result, _ = process_turn("What is AAPL revenue?", [])
 
     assert "https://reuters.com/aapl" in result
@@ -222,7 +222,7 @@ def test_tavily_fallback_skipped_when_confident():
     mock_search = MagicMock()
     with patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator._web_search_with_sources", mock_search), \
-         patch("orchestrator.run_financials", return_value=("AAPL P/E: 28x", 0)), \
+         patch("orchestrator.run_financials", return_value=("AAPL P/E: 28x", 0, {})), \
          patch("orchestrator.llm_chat", side_effect=[(plan, 0), (confident_answer, 0)]):
         result, _ = process_turn("What is AAPL P/E?", [])
 
@@ -238,7 +238,7 @@ def test_tavily_fallback_skipped_when_empty_results():
     plan = json.dumps({"agents": ["financials"], "tickers": ["AAPL"]})
     with patch("orchestrator.is_uncertain", return_value=True), \
          patch("orchestrator._web_search_with_sources", return_value=("", [])), \
-         patch("orchestrator.run_financials", return_value=("AAPL revenue: $391B", 0)), \
+         patch("orchestrator.run_financials", return_value=("AAPL revenue: $391B", 0, {})), \
          patch("orchestrator.llm_chat", side_effect=[(plan, 0), (uncertain_answer, 0)]):
         result, _ = process_turn("What is AAPL revenue?", [])
 
@@ -255,7 +255,7 @@ def test_market_news_intent_triggers_proactive_web_search():
          patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator._web_search_with_sources",
                return_value=("S&P fell 2% on rate fears per Reuters.", ["https://reuters.com/mkt"])) as mock_search, \
-         patch("orchestrator.run_news", return_value=("Headlines: tech slid", 0)):
+         patch("orchestrator.run_news", return_value=("Headlines: tech slid", 0, {})):
         result, _ = process_turn("why is the market down today?", [])
 
     mock_search.assert_called_once()
@@ -272,7 +272,7 @@ def test_specific_tickers_intent_no_proactive_search():
     with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("AAPL P/E is 28x.", 0)]), \
          patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator._web_search_with_sources", mock_search), \
-         patch("orchestrator.run_financials", return_value=("## AAPL\nP/E: 28x", 0)):
+         patch("orchestrator.run_financials", return_value=("## AAPL\nP/E: 28x", 0, {})):
         process_turn("what is AAPL P/E?", [])
 
     mock_search.assert_not_called()
@@ -287,7 +287,7 @@ def test_missing_intent_defaults_to_no_proactive_search():
     with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("AAPL revenue $391B.", 0)]), \
          patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator._web_search_with_sources", mock_search), \
-         patch("orchestrator.run_financials", return_value=("## AAPL\nRevenue: $391B", 0)):
+         patch("orchestrator.run_financials", return_value=("## AAPL\nRevenue: $391B", 0, {})):
         process_turn("AAPL revenue?", [])
 
     mock_search.assert_not_called()
@@ -307,7 +307,7 @@ def test_reactive_fallback_when_all_agents_return_no_data():
          patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator._web_search_with_sources",
                return_value=("LITE PEG 1.2 per Reuters.", ["https://r.com/lite"])), \
-         patch("orchestrator.run_financials", return_value=("## LITE\nERROR: No company info for LITE", 0)):
+         patch("orchestrator.run_financials", return_value=("## LITE\nERROR: No company info for LITE", 0, {})):
         result, _ = process_turn("what about LITE PEG?", [])
 
     assert "https://r.com/lite" in result
@@ -323,7 +323,7 @@ def test_reactive_fallback_not_fired_on_real_data():
     with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("AAPL revenue was $391B.", 0)]), \
          patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator._web_search_with_sources", mock_search), \
-         patch("orchestrator.run_financials", return_value=("## AAPL\nRevenue: $391,035M", 0)):
+         patch("orchestrator.run_financials", return_value=("## AAPL\nRevenue: $391,035M", 0, {})):
         process_turn("AAPL revenue?", [])
 
     mock_search.assert_not_called()

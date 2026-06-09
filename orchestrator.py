@@ -175,17 +175,17 @@ def process_turn(
             fn = agent_map.get(agent_name)
             if fn is None:
                 logging.warning("[Orchestrator] unknown agent '%s' — skipping", agent_name)
-                return agent_name, None, 0
+                return agent_name, None, 0, None
             try:
                 logging.info("[Orchestrator] → calling agent: %s", agent_name)
                 t1 = time.time()
-                result, agent_tokens = fn(agent_input, "", history=messages, expected_tickers=tickers if tickers else None)
+                result, agent_tokens, tool_blocks = fn(agent_input, "", history=messages, expected_tickers=tickers if tickers else None)
                 logging.info("[Orchestrator] ✓ agent %s done (%.2fs)", agent_name, time.time() - t1)
-                return agent_name, result, agent_tokens
+                return agent_name, result, agent_tokens, tool_blocks
             except Exception as e:
                 logging.warning("[Orchestrator] %s agent failed — %s", agent_name, e)
                 _log_agent_error(agent_name, e)
-                return agent_name, None, 0
+                return agent_name, None, 0, None
         finally:
             otel_context.detach(ctx_token)
 
@@ -193,11 +193,14 @@ def process_turn(
     with ThreadPoolExecutor() as executor:
         futures = {executor.submit(_run_agent, name): name for name in agents_to_run}
         agent_results = {}
+        agent_tool_blocks: dict[str, dict] = {}
         for future in as_completed(futures):
-            name, result, agent_tokens = future.result()
+            name, result, agent_tokens, tool_blocks = future.result()
             agent_tokens_total += agent_tokens
             if result is not None:
                 agent_results[name] = result
+            if tool_blocks:
+                agent_tool_blocks[name] = tool_blocks
 
     # Preserve plan order in accumulated context
     for name in agents_to_run:
