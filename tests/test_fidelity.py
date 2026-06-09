@@ -62,3 +62,70 @@ def test_year_from_fy_token():
 def test_number_without_year_has_none():
     pairs = extract_year_bound_numbers("Gross margin is 45.2%")
     assert (None, 45.2, "percent") in [(y, n.value, n.kind) for y, n in pairs]
+
+
+from tools.fidelity import verify
+from tools.income import get_income_statement
+from tools.balance_sheet import get_balance_sheet
+from tools.db import load_earnings
+
+# Real tool outputs fetched from the live cache — these are the exact strings the
+# orchestrator receives and passes into verify(). No fabricated data.
+_INCOME_BLOCK = get_income_statement("AAPL")
+_BALANCE_BLOCK = get_balance_sheet("AAPL")
+_EARNINGS_BLOCK = load_earnings("AAPL")
+
+_TOOL_BLOCKS = {
+    "get_income_statement({\"ticker\": \"AAPL\"})": _INCOME_BLOCK,
+    "get_balance_sheet({\"ticker\": \"AAPL\"})": _BALANCE_BLOCK,
+    "get_earnings({\"ticker\": \"AAPL\"})": _EARNINGS_BLOCK,
+}
+
+
+def test_exact_match_no_mismatch():
+    # Real FY2024 (Sep 28, 2024) net sales from 10-K: 391,035M
+    assert verify("Net sales were 391,035M in FY2024", _TOOL_BLOCKS) == []
+
+
+def test_reformatted_unit_matches():
+    # Same value written with a leading $ — fidelity must still pass
+    assert verify("Net sales were $391,035M in FY2024", _TOOL_BLOCKS) == []
+
+
+def test_rounded_within_tolerance_matches():
+    # 391,000M is within 1% of the real 391,035M
+    assert verify("Roughly $391,000M in FY2024", _TOOL_BLOCKS) == []
+
+
+def test_genuinely_wrong_number_flagged():
+    # 500,000M has no grounding in any year's data — must be flagged
+    ms = verify("FY2024 net sales were 500,000M", _TOOL_BLOCKS)
+    assert len(ms) == 1
+    assert ms[0].number.value == 500000.0
+
+
+def test_year_mislabel_flagged():
+    # Real FY2023 (Sep 30, 2023) net sales: 383,285M.
+    # Labeling near-match 383,058M as FY2025 must be flagged:
+    # FY2025 (Sep 27, 2025) net sales = 416,161M — 383,058M is not within 1%.
+    ms = verify("FY2025 net sales were $383,058M", _TOOL_BLOCKS)
+    assert len(ms) == 1
+    assert ms[0].year == 2025
+
+
+def test_balance_sheet_value_passes():
+    # Real Sep 28, 2024 cash (balance sheet, no year on value line → any-year):
+    # $29,943M. Answer has no year token so any-year lookup is used.
+    assert verify("Cash and cash equivalents were $29,943M", _TOOL_BLOCKS) == []
+
+
+def test_earnings_eps_passes():
+    # Real EPS $1.85 from AAPL Q3 2025. Earnings lines carry no year token, so
+    # grounded in any_year. Answer must also carry no year token to use any-year
+    # lookup (a year token would route to by_year which has no EPS entries).
+    assert verify("AAPL EPS was $1.85", _TOOL_BLOCKS) == []
+
+
+def test_empty_grounding_flags_all_numbers():
+    ms = verify("Net sales were 391,035M and margin 45%", {})
+    assert len(ms) == 2

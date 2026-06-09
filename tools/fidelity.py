@@ -78,3 +78,49 @@ def extract_year_bound_numbers(text: str) -> list[tuple[int | None, Number]]:
         for num in extract_numbers(line):
             out.append((year, num))
     return out
+
+
+@dataclass(frozen=True)
+class Mismatch:
+    number: Number
+    year: int | None
+
+
+def build_grounding(tool_blocks: dict[str, str]):
+    """Index the tools' raw outputs into year-scoped and any-year value sets,
+    keyed by number kind. Returns (by_year, any_year)."""
+    by_year: dict[tuple[int, str], set[float]] = defaultdict(set)
+    any_year: dict[str, set[float]] = defaultdict(set)
+    for block in (tool_blocks or {}).values():
+        if not isinstance(block, str):
+            continue
+        for year, num in extract_year_bound_numbers(block):
+            any_year[num.kind].add(num.value)
+            if year is not None:
+                by_year[(year, num.kind)].add(num.value)
+    return by_year, any_year
+
+
+def _close(value: float, candidates, rel_tol: float) -> bool:
+    for c in candidates:
+        denom = max(abs(value), abs(c), 1e-9)
+        if abs(value - c) <= rel_tol * denom:
+            return True
+    return False
+
+
+def verify(answer: str, tool_blocks: dict[str, str], rel_tol: float = 0.01) -> list[Mismatch]:
+    """Flag every unit-bearing number in `answer` that cannot be traced to the
+    tool outputs. Year-aware: a number carrying a fiscal year must match a value
+    grounded FOR THAT YEAR; a number with no year falls back to any-year matching.
+    Pure + flag-only — never mutates `answer`."""
+    by_year, any_year = build_grounding(tool_blocks)
+    mismatches: list[Mismatch] = []
+    for year, num in extract_year_bound_numbers(answer):
+        if year is not None:
+            candidates = by_year.get((year, num.kind), set())
+        else:
+            candidates = any_year.get(num.kind, set())
+        if not _close(num.value, candidates, rel_tol):
+            mismatches.append(Mismatch(number=num, year=year))
+    return mismatches
