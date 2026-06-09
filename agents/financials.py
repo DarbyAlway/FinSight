@@ -101,7 +101,7 @@ OPT = {"temperature": 0.1}
 
 
 @observe(name="financials-agent")
-def run(user_question: str, context: str = "", history: list[dict] | None = None, expected_tickers: list[str] | None = None) -> tuple[str, int]:
+def run(user_question: str, context: str = "", history: list[dict] | None = None, expected_tickers: list[str] | None = None) -> tuple[str, int, dict]:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if history:
         messages += history[-6:]
