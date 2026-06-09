@@ -97,16 +97,40 @@ def _nearest_year(start: int, year_positions: list[tuple[int, int]]) -> int | No
 
 
 def extract_year_bound_numbers(text: str) -> list[tuple[int | None, Number]]:
-    """Pair each unit-bearing number with its nearest fiscal year, per line.
+    """Pair each unit-bearing number with its fiscal year, per line.
 
-    Year association is PROXIMITY-based, not last-year-wins: a sentence like
-    '$391,035M in FY2024 and $383,285M in FY2023' binds each figure to its own
-    year. When no year token is on the line, the year is None (any-year match)."""
+    Two phrasings are handled:
+      * Interleaved ('$391,035M in FY2024 and $383,285M in FY2023') — each figure
+        binds to its NEAREST year (preferring one at/after it).
+      * Enumeration ('FY2023, FY2024, FY2025 ... are $X, $Y, $Z respectively') —
+        when N year tokens ALL precede N same-kind values, they bind IN ORDER
+        (i-th year <-> i-th value). Without this, all values fall back to the last
+        preceding year and the earlier ones false-flag.
+    When no year token is on the line, the year is None (any-year match)."""
     out: list[tuple[int | None, Number]] = []
     for line in text.splitlines():
-        year_positions = [(m.start(1), int(m.group(1))) for m in _YEAR_RE.finditer(line)]
-        for start, num in _iter_number_matches(line):
-            out.append((_nearest_year(start, year_positions), num))
+        year_positions = sorted((m.start(1), int(m.group(1))) for m in _YEAR_RE.finditer(line))
+        nums = _iter_number_matches(line)
+
+        # Enumeration pass: per kind, if #years == #values and every year token
+        # comes before every value of that kind, bind them positionally.
+        enum_year: dict[int, int] = {}  # index into nums -> year
+        if len(year_positions) >= 2:
+            max_year_pos = year_positions[-1][0]
+            by_kind: dict[str, list[tuple[int, int]]] = defaultdict(list)
+            for i, (start, num) in enumerate(nums):
+                by_kind[num.kind].append((start, i))
+            for group in by_kind.values():
+                group.sort()
+                if len(group) == len(year_positions) and group[0][0] > max_year_pos:
+                    for (_, yr), (_, idx) in zip(year_positions, group):
+                        enum_year[idx] = yr
+
+        for i, (start, num) in enumerate(nums):
+            if i in enum_year:
+                out.append((enum_year[i], num))
+            else:
+                out.append((_nearest_year(start, year_positions), num))
     return out
 
 

@@ -217,3 +217,50 @@ def test_real_correct_multi_year_answer_not_flagged():
     # so a faithful verifier must report ZERO mismatches.
     answer = "Apple's revenue was $391,035 million in FY2024 and $383,285 million in FY2023."
     assert verify(answer, _TOOL_BLOCKS) == []
+
+
+# ----------------------------------------------------------------------------
+# Regression: a second live run (MSFT) gave the CORRECT answer in 'years-then-
+# values respectively' form. The old proximity binding put every value under the
+# last preceding year (FY2025), false-flagging the FY2023/FY2024 figures.
+# Enumeration binding must map i-th year to i-th value.
+# ----------------------------------------------------------------------------
+
+def test_enumeration_years_then_values_binds_in_order():
+    s = ("FY2023, FY2024, and FY2025, which are $211,915 million, "
+         "$245,122 million, and $281,724 million, respectively.")
+    d = {(y, n.kind): n.value for y, n in extract_year_bound_numbers(s)}
+    assert d[(2023, "money_millions")] == 211915.0
+    assert d[(2024, "money_millions")] == 245122.0
+    assert d[(2025, "money_millions")] == 281724.0
+
+
+def test_enumeration_correct_answer_not_flagged():
+    # Real MSFT revenue in real income-statement format; the live-run phrasing.
+    blocks = {"get_income_statement({\"ticker\": \"MSFT\"})": (
+        "MSFT Income Statement (cached)\n"
+        "  Revenue\n"
+        "    Total revenue: 211,915M  (Jun 30, 2023)\n"
+        "    Total revenue: 245,122M  (Jun 30, 2024)\n"
+        "    Total revenue: 281,724M  (Jun 30, 2025)\n"
+    )}
+    answer = ("FY2023, FY2024, and FY2025 revenues are $211,915 million, "
+              "$245,122 million, and $281,724 million, respectively.")
+    assert verify(answer, blocks) == []
+
+
+def test_enumeration_does_not_mask_real_mislabel():
+    # A genuine year-mislabel inside an enumeration must STILL flag: here the
+    # FY2024 slot carries 999,999M, which is real for no MSFT year.
+    blocks = {"get_income_statement({\"ticker\": \"MSFT\"})": (
+        "MSFT Income Statement (cached)\n"
+        "    Total revenue: 211,915M  (Jun 30, 2023)\n"
+        "    Total revenue: 245,122M  (Jun 30, 2024)\n"
+        "    Total revenue: 281,724M  (Jun 30, 2025)\n"
+    )}
+    answer = ("FY2023, FY2024, and FY2025 revenues are $211,915 million, "
+              "$999,999 million, and $281,724 million, respectively.")
+    ms = verify(answer, blocks)
+    assert len(ms) == 1
+    assert ms[0].number.value == 999999.0
+    assert ms[0].year == 2024
