@@ -138,6 +138,8 @@ def extract_year_bound_numbers(text: str) -> list[tuple[int | None, Number]]:
 class Mismatch:
     number: Number
     year: int | None
+    hard: bool  # True = value absent from EVERY fetched year (likely fabricated);
+    #             False = value is real for some OTHER year (mislabel or phrasing)
 
 
 def build_grounding(tool_blocks: dict[str, str]):
@@ -176,5 +178,8 @@ def verify(answer: str, tool_blocks: dict[str, str], rel_tol: float = 0.01) -> l
         else:
             candidates = any_year.get(num.kind, set())
         if not _close(num.value, candidates, rel_tol):
-            mismatches.append(Mismatch(number=num, year=year))
+            # HARD when the value is real for NO fetched year (likely fabricated);
+            # SOFT when it matches some other year (mislabel or list phrasing).
+            hard = not _close(num.value, any_year.get(num.kind, set()), rel_tol)
+            mismatches.append(Mismatch(number=num, year=year, hard=hard))
     return mismatches

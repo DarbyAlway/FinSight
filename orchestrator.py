@@ -265,21 +265,49 @@ def process_turn(
             logging.info("[Orchestrator] Tavily fallback used (%d sources)", len(urls))
     logging.info("[timing] synthesis call: %.2fs", time.time() - t2)
 
-    # Phase 2 (#14): flag-only number-fidelity check. NEVER mutates `answer`.
-    # Skip market_news: those figures legitimately come from live web search, not
-    # the local tool outputs, so they are not expected in the grounding.
-    if intent != "market_news" and agents_to_run:
+    # Phase 2 (#14): year-aware number-fidelity check. We only have grounding when
+    # agents actually returned tool outputs; skip market_news (web-sourced figures).
+    if intent != "market_news" and agent_tool_blocks:
         merged_blocks: dict[str, str] = {}
         for blocks in agent_tool_blocks.values():
             merged_blocks.update(blocks)
-        mismatches = verify_fidelity(answer, merged_blocks)
-        for m in mismatches:
-            logging.warning(
-                "[fidelity] untraced number %r (kind=%s, year=%s) not found in tool outputs",
-                m.number.raw, m.number.kind, m.year,
-            )
-        logging.info("[fidelity] checked answer: %d untraced unit-bearing number(s)", len(mismatches))
-        _score_fidelity(len(mismatches))
+        if merged_blocks:
+            mismatches = verify_fidelity(answer, merged_blocks)
+            for m in mismatches:
+                logging.warning(
+                    "[fidelity] %s untraced number %r (kind=%s, year=%s)",
+                    "HARD" if m.hard else "soft", m.number.raw, m.number.kind, m.year,
+                )
+            # A HARD miss = a figure that exists for NO fetched year, i.e. the model
+            # likely pulled it from prior knowledge. Trigger ONE grounded self-
+            # critique: hand the model its own answer + the offending figures and
+            # have it re-check against the agent outputs. SOFT misses (real value,
+            # wrong/ambiguous year) stay flag-only — re-prompting risks churn.
+            hard = [m for m in mismatches if m.hard]
+            if hard:
+                bad = ", ".join(sorted({m.number.raw for m in hard}))
+                logging.warning("[fidelity] %d HARD mismatch(es) [%s] → self-critique re-prompt", len(hard), bad)
+                critique_messages = synthesis_messages + [
+                    {"role": "assistant", "content": answer},
+                    {"role": "user", "content": (
+                        f"Self-check: the figures [{bad}] in your answer do NOT appear in the agent "
+                        "outputs above — they look like prior knowledge, not the provided data. "
+                        "Re-read the agent outputs and rewrite your answer using ONLY figures that "
+                        "appear there. For any value not present, state that it is not available "
+                        "rather than estimating or recalling it."
+                    )},
+                ]
+                corrected, corr_tokens = _synthesis_step(critique_messages)
+                synth_tokens += corr_tokens
+                if corrected:
+                    answer = corrected
+                    mismatches = verify_fidelity(answer, merged_blocks)
+                    logging.info(
+                        "[fidelity] after self-critique: %d untraced (%d hard)",
+                        len(mismatches), sum(1 for m in mismatches if m.hard),
+                    )
+            logging.info("[fidelity] checked answer: %d untraced unit-bearing number(s)", len(mismatches))
+            _score_fidelity(len(mismatches))
 
     total_tokens = plan_tokens + agent_tokens_total + synth_tokens
     logging.info("[tokens] plan=%d agents=%d synthesis=%d total=%d",

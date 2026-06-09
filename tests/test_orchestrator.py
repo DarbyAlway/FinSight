@@ -313,24 +313,49 @@ def test_reactive_fallback_when_all_agents_return_no_data():
     assert "https://r.com/lite" in result
 
 
-def test_fidelity_flags_untraced_number_and_leaves_answer_unchanged(caplog):
-    """Agent tool_blocks carry FY2024 revenue 391,035M; synthesis prints a WRONG
-    500,000M. The flag-only verifier must log it and NOT mutate the answer."""
+def test_fidelity_soft_mismatch_is_flag_only(caplog):
+    """A SOFT mismatch (value real for another year, just wrong-year labeled) is
+    logged but NOT re-prompted — answer returned unchanged."""
     import logging
     from orchestrator import process_turn
 
     plan_json = json.dumps({"intent": "specific_tickers", "agents": ["financials"], "tickers": ["AAPL"]})
-    tool_blocks = {"get_income_statement({})": "Total revenue: 391,035M  (Sep 28, 2024)"}
-
-    with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("FY2024 revenue was 500,000M.", 0)]), \
+    # Grounding: FY2024=391,035 and FY2023=383,285.
+    tool_blocks = {"get_income_statement({})":
+                   "Total revenue: 391,035M  (Sep 28, 2024)\nTotal revenue: 383,285M  (Sep 30, 2023)"}
+    # 391,035 is real but labeled FY2023 (it's the FY2024 value) -> SOFT.
+    with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("FY2023 revenue was 391,035M.", 0)]), \
          patch("orchestrator.is_uncertain", return_value=False), \
          patch("orchestrator._web_search_with_sources", MagicMock()), \
-         patch("orchestrator.run_financials", return_value=("## AAPL\nRevenue: 391,035M  (Sep 28, 2024)", 0, tool_blocks)):
+         patch("orchestrator.run_financials", return_value=("## AAPL\ndata", 0, tool_blocks)):
         with caplog.at_level(logging.WARNING):
-            result, _ = process_turn("AAPL FY2024 revenue?", [])
+            result, _ = process_turn("AAPL revenue?", [])
 
-    assert "500,000M" in result  # answer returned byte-for-byte, never mutated
-    assert any("fidelity" in r.message.lower() for r in caplog.records)
+    assert "391,035M" in result  # flag-only: answer unchanged
+    assert any("soft untraced" in r.message.lower() for r in caplog.records)
+
+
+def test_fidelity_reprompts_on_hard_hallucination(caplog):
+    """A HARD mismatch (figure absent from ALL fetched years) triggers a grounded
+    self-critique re-prompt; the corrected answer replaces the hallucinated one."""
+    import logging
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"intent": "specific_tickers", "agents": ["financials"], "tickers": ["MSFT"]})
+    tool_blocks = {"get_income_statement({})": "Total revenue: 281,724M  (Jun 30, 2025)"}
+    hallucinated = "MSFT FY2020 revenue was $143,015 million."   # absent from grounding -> HARD
+    corrected = "MSFT FY2020 revenue is not available in the provided data."
+
+    with patch("orchestrator.llm_chat",
+               side_effect=[(plan_json, 0), (hallucinated, 0), (corrected, 0)]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator._web_search_with_sources", MagicMock()), \
+         patch("orchestrator.run_financials", return_value=("## MSFT\nRevenue: 281,724M  (Jun 30, 2025)", 0, tool_blocks)):
+        with caplog.at_level(logging.WARNING):
+            result, _ = process_turn("MSFT FY2020 revenue?", [])
+
+    assert result == corrected  # self-critique replaced the hallucinated answer
+    assert any("self-critique" in r.message.lower() for r in caplog.records)
 
 
 def test_fidelity_silent_when_numbers_traceable(caplog):

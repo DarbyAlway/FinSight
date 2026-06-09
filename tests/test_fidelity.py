@@ -98,10 +98,11 @@ def test_rounded_within_tolerance_matches():
 
 
 def test_genuinely_wrong_number_flagged():
-    # 500,000M has no grounding in any year's data — must be flagged
+    # 500,000M has no grounding in any year's data — must be flagged as HARD
     ms = verify("FY2024 net sales were 500,000M", _TOOL_BLOCKS)
     assert len(ms) == 1
     assert ms[0].number.value == 500000.0
+    assert ms[0].hard is True  # absent from every fetched year
 
 
 def test_year_mislabel_flagged():
@@ -111,6 +112,8 @@ def test_year_mislabel_flagged():
     ms = verify("FY2025 net sales were $383,058M", _TOOL_BLOCKS)
     assert len(ms) == 1
     assert ms[0].year == 2025
+    # 383,058 is within 1% of FY2023's real 383,285 -> real for another year -> SOFT
+    assert ms[0].hard is False
 
 
 def test_balance_sheet_value_passes():
