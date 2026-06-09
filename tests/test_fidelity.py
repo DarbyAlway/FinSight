@@ -44,3 +44,21 @@ def test_dollar_and_suffix_not_double_counted():
     nums = extract_numbers("$1.23B")
     assert len(nums) == 1
     assert nums[0].kind == "money_millions"
+
+
+from tools.fidelity import extract_year_bound_numbers
+
+
+def test_year_from_date_on_line():
+    pairs = extract_year_bound_numbers("Revenue: 391,035M  (Sep 28, 2024)")
+    assert (2024, 391035.0, "money_millions") in [(y, n.value, n.kind) for y, n in pairs]
+
+
+def test_year_from_fy_token():
+    pairs = extract_year_bound_numbers("FY2025 revenue was $383,058M")
+    assert (2025, 383058.0, "money_millions") in [(y, n.value, n.kind) for y, n in pairs]
+
+
+def test_number_without_year_has_none():
+    pairs = extract_year_bound_numbers("Gross margin is 45.2%")
+    assert (None, 45.2, "percent") in [(y, n.value, n.kind) for y, n in pairs]

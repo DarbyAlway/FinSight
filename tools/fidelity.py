@@ -65,3 +65,16 @@ def extract_numbers(text: str) -> list[Number]:
         if _claim(m):
             out.append(Number(m.group(0).strip(), _to_float(m.group(1)), "ratio"))
     return out
+
+
+def extract_year_bound_numbers(text: str) -> list[tuple[int | None, Number]]:
+    """Pair each unit-bearing number with the fiscal year on its own line, if any.
+    A line like 'Revenue: 391,035M  (Sep 28, 2024)' -> (2024, <391035 money>).
+    When no year token is on the line, the year is None (any-year matching)."""
+    out: list[tuple[int | None, Number]] = []
+    for line in text.splitlines():
+        years = _YEAR_RE.findall(line)
+        year = int(years[-1]) if years else None  # date "Sep 28, 2024" -> 2024
+        for num in extract_numbers(line):
+            out.append((year, num))
+    return out
