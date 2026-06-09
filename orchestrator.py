@@ -36,6 +36,16 @@ from prompts import PLAN_SYSTEM, SYNTHESIS_SYSTEM, TIME_SENSITIVE_KEYWORDS
 from tools.search_guardrails import is_uncertain, _web_search_with_sources, agents_returned_nothing
 from tools.groups import detect_group_in_query
 from tools.resolve import validate_tickers
+from tools.fidelity import verify as verify_fidelity
+
+
+def _score_fidelity(n_mismatches: int) -> None:
+    """Best-effort Langfuse trace score; never raises into the request path."""
+    try:
+        from langfuse import get_client
+        get_client().score_current_trace(name="fidelity_mismatches", value=n_mismatches)
+    except Exception as e:  # scoring is observability only
+        logging.debug("[fidelity] score skipped: %s", e)
 
 OPT_PLAN = {"temperature": 0.0}
 OPT_SYNTH = {"temperature": 0.3}
@@ -254,6 +264,22 @@ def process_turn(
                 answer += "\n\n**Web sources:**\n" + "\n".join(f"- {url}" for url in urls)
             logging.info("[Orchestrator] Tavily fallback used (%d sources)", len(urls))
     logging.info("[timing] synthesis call: %.2fs", time.time() - t2)
+
+    # Phase 2 (#14): flag-only number-fidelity check. NEVER mutates `answer`.
+    # Skip market_news: those figures legitimately come from live web search, not
+    # the local tool outputs, so they are not expected in the grounding.
+    if intent != "market_news" and agents_to_run:
+        merged_blocks: dict[str, str] = {}
+        for blocks in agent_tool_blocks.values():
+            merged_blocks.update(blocks)
+        mismatches = verify_fidelity(answer, merged_blocks)
+        for m in mismatches:
+            logging.warning(
+                "[fidelity] untraced number %r (kind=%s, year=%s) not found in tool outputs",
+                m.number.raw, m.number.kind, m.year,
+            )
+        logging.info("[fidelity] checked answer: %d untraced unit-bearing number(s)", len(mismatches))
+        _score_fidelity(len(mismatches))
 
     total_tokens = plan_tokens + agent_tokens_total + synth_tokens
     logging.info("[tokens] plan=%d agents=%d synthesis=%d total=%d",
