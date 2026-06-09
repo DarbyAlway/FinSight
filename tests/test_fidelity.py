@@ -129,3 +129,63 @@ def test_earnings_eps_passes():
 def test_empty_grounding_flags_all_numbers():
     ms = verify("Net sales were 391,035M and margin 45%", {})
     assert len(ms) == 2
+
+
+# ----------------------------------------------------------------------------
+# Edge cases: word-form magnitudes, ranges, multi-number lines, kind mismatch.
+# Real synthesis models routinely write "$391 billion" rather than "391,035M".
+# ----------------------------------------------------------------------------
+
+def test_word_form_billion_is_money_millions():
+    assert (391000.0, "money_millions") in _kinds("Revenue was $391 billion")
+
+
+def test_word_form_million():
+    assert (1500.0, "money_millions") in _kinds("Net income of 1,500 million")
+
+
+def test_word_form_trillion():
+    assert (3000000.0, "money_millions") in _kinds("Market cap of $3 trillion")
+
+
+def test_word_form_not_double_counted_with_dollars():
+    nums = extract_numbers("$391 billion")
+    assert len(nums) == 1
+    assert nums[0].kind == "money_millions"
+
+
+def test_word_form_matches_suffix_grounding():
+    # Grounding income block has 391,035M; "$391 billion" == 391,000M, within 1%.
+    # Cross-format match is the whole point — a model reformatting must still pass.
+    assert verify("Net sales were $391 billion in FY2024", _TOOL_BLOCKS) == []
+
+
+def test_negative_loss_margin_percent_extracted():
+    # Real loss-makers report negative margins. The sign is currently DROPPED
+    # (both answer and grounding parse the same way, so matching still works).
+    # KNOWN LIMITATION: a pure sign-flip (+5.2% vs -5.2%) would not be flagged.
+    assert (5.2, "percent") in _kinds("Operating margin was -5.2%")
+
+
+def test_multiple_numbers_one_line():
+    vals = {(n.value, n.kind) for n in extract_numbers("Revenue $391,035M, net income $93,736M")}
+    assert (391035.0, "money_millions") in vals
+    assert (93736.0, "money_millions") in vals
+
+
+def test_money_range_yields_two_numbers():
+    vals = [n.value for n in extract_numbers("guidance of $100M to $120M")]
+    assert 100.0 in vals and 120.0 in vals
+
+
+def test_kind_mismatch_is_flagged():
+    # answer says "1.85%" but grounding only has 1.85 as a ratio (x) — wrong kind.
+    blocks = {"get_ratios({})": "Current ratio: 1.85x  (Sep 28, 2024)"}
+    ms = verify("The figure was 1.85% in FY2024", blocks)
+    assert len(ms) == 1
+    assert ms[0].number.kind == "percent"
+
+
+def test_ratio_grounds_correctly():
+    blocks = {"get_ratios({})": "Current ratio: 1.85x  (Sep 28, 2024)"}
+    assert verify("Current ratio was 1.85x in FY2024", blocks) == []

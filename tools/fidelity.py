@@ -15,6 +15,13 @@ _MAG = {"T": 1_000_000.0, "B": 1_000.0, "M": 1.0, "K": 0.001}
 # money: optional '$', grouped digits with optional decimals, REQUIRED magnitude
 # suffix. Matches "391,035M", "$93,736M", "$1.23B", "$3T".
 _MONEY_RE = re.compile(r"\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*([TBMK])\b")
+# word-form magnitudes the synthesis model routinely writes ("$391 billion",
+# "1.5 million"). Same normalization to MILLIONS as the suffix form.
+_MONEY_WORD_MAG = {"trillion": 1_000_000.0, "billion": 1_000.0, "million": 1.0, "thousand": 0.001}
+_MONEY_WORD_RE = re.compile(
+    r"\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(trillion|billion|million|thousand)\b",
+    re.IGNORECASE,
+)
 # plain dollars (price/EPS): '$' + number, NO magnitude suffix. "$182.50", "$1.64"
 _DOLLARS_RE = re.compile(r"\$\s*([0-9][0-9,]*(?:\.[0-9]+)?)(?![0-9TBMK%])")
 _PCT_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)\s*%")
@@ -51,10 +58,13 @@ def extract_numbers(text: str) -> list[Number]:
         return True
 
     out: list[Number] = []
-    # priority: money (suffix) > dollars > percent > ratio
+    # priority: money (suffix) > money (word) > dollars > percent > ratio
     for m in _MONEY_RE.finditer(text):
         if _claim(m):
             out.append(Number(m.group(0).strip(), _to_float(m.group(1)) * _MAG[m.group(2)], "money_millions"))
+    for m in _MONEY_WORD_RE.finditer(text):
+        if _claim(m):
+            out.append(Number(m.group(0).strip(), _to_float(m.group(1)) * _MONEY_WORD_MAG[m.group(2).lower()], "money_millions"))
     for m in _DOLLARS_RE.finditer(text):
         if _claim(m):
             out.append(Number(m.group(0).strip(), _to_float(m.group(1)), "dollars"))

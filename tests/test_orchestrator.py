@@ -313,6 +313,44 @@ def test_reactive_fallback_when_all_agents_return_no_data():
     assert "https://r.com/lite" in result
 
 
+def test_fidelity_flags_untraced_number_and_leaves_answer_unchanged(caplog):
+    """Agent tool_blocks carry FY2024 revenue 391,035M; synthesis prints a WRONG
+    500,000M. The flag-only verifier must log it and NOT mutate the answer."""
+    import logging
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"intent": "specific_tickers", "agents": ["financials"], "tickers": ["AAPL"]})
+    tool_blocks = {"get_income_statement({})": "Total revenue: 391,035M  (Sep 28, 2024)"}
+
+    with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("FY2024 revenue was 500,000M.", 0)]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator._web_search_with_sources", MagicMock()), \
+         patch("orchestrator.run_financials", return_value=("## AAPL\nRevenue: 391,035M  (Sep 28, 2024)", 0, tool_blocks)):
+        with caplog.at_level(logging.WARNING):
+            result, _ = process_turn("AAPL FY2024 revenue?", [])
+
+    assert "500,000M" in result  # answer returned byte-for-byte, never mutated
+    assert any("fidelity" in r.message.lower() for r in caplog.records)
+
+
+def test_fidelity_silent_when_numbers_traceable(caplog):
+    """When synthesis quotes a number present in tool_blocks, no fidelity WARNING."""
+    import logging
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"intent": "specific_tickers", "agents": ["financials"], "tickers": ["AAPL"]})
+    tool_blocks = {"get_income_statement({})": "Total revenue: 391,035M  (Sep 28, 2024)"}
+
+    with patch("orchestrator.llm_chat", side_effect=[(plan_json, 0), ("FY2024 revenue was 391,035M.", 0)]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator._web_search_with_sources", MagicMock()), \
+         patch("orchestrator.run_financials", return_value=("## AAPL\nRevenue: 391,035M  (Sep 28, 2024)", 0, tool_blocks)):
+        with caplog.at_level(logging.WARNING):
+            process_turn("AAPL FY2024 revenue?", [])
+
+    assert not any("untraced number" in r.message.lower() for r in caplog.records)
+
+
 def test_reactive_fallback_not_fired_on_real_data():
     """Real agent data + confident answer → no web search (no false-firing)."""
     from orchestrator import process_turn
