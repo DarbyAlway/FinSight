@@ -189,3 +189,31 @@ def test_kind_mismatch_is_flagged():
 def test_ratio_grounds_correctly():
     blocks = {"get_ratios({})": "Current ratio: 1.85x  (Sep 28, 2024)"}
     assert verify("Current ratio was 1.85x in FY2024", blocks) == []
+
+
+# ----------------------------------------------------------------------------
+# Regression: a live SambaNova run produced the CORRECT answer below, but the
+# old last-year-wins heuristic bound BOTH figures to FY2023, false-flagging the
+# FY2024 value. Year association must be per-figure (proximity-based).
+# ----------------------------------------------------------------------------
+
+def test_multi_figure_sentence_assigns_year_by_proximity():
+    pairs = extract_year_bound_numbers(
+        "Apple's revenue was $391,035 million in FY2024 and $383,285 million in FY2023."
+    )
+    d = {(y, n.kind): n.value for y, n in pairs}
+    assert d[(2024, "money_millions")] == 391035.0
+    assert d[(2023, "money_millions")] == 383285.0
+
+
+def test_year_before_number_still_associates():
+    # 'FY2024 revenue was $391,035M' — year precedes the value
+    pairs = extract_year_bound_numbers("FY2024 revenue was $391,035M")
+    assert (2024, 391035.0, "money_millions") in [(y, n.value, n.kind) for y, n in pairs]
+
+
+def test_real_correct_multi_year_answer_not_flagged():
+    # The exact live-run answer. Both figures are real and correctly labeled,
+    # so a faithful verifier must report ZERO mismatches.
+    answer = "Apple's revenue was $391,035 million in FY2024 and $383,285 million in FY2023."
+    assert verify(answer, _TOOL_BLOCKS) == []

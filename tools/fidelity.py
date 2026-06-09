@@ -42,11 +42,9 @@ def _to_float(digits: str) -> float:
     return float(digits.replace(",", ""))
 
 
-def extract_numbers(text: str) -> list[Number]:
-    """Extract only UNIT-BEARING numbers. Bare integers, counts, and 4-digit
-    years are deliberately ignored (primary false-positive defense)."""
-    if not text:
-        return []
+def _iter_number_matches(text: str) -> list[tuple[int, Number]]:
+    """Yield (start_offset, Number) for every UNIT-BEARING number, de-overlapped
+    in priority order. Bare integers, counts, and 4-digit years are ignored."""
     consumed: list[tuple[int, int]] = []  # spans already claimed, highest priority first
 
     def _claim(m) -> bool:
@@ -57,36 +55,58 @@ def extract_numbers(text: str) -> list[Number]:
         consumed.append((s, e))
         return True
 
-    out: list[Number] = []
+    out: list[tuple[int, Number]] = []
     # priority: money (suffix) > money (word) > dollars > percent > ratio
     for m in _MONEY_RE.finditer(text):
         if _claim(m):
-            out.append(Number(m.group(0).strip(), _to_float(m.group(1)) * _MAG[m.group(2)], "money_millions"))
+            out.append((m.start(), Number(m.group(0).strip(), _to_float(m.group(1)) * _MAG[m.group(2)], "money_millions")))
     for m in _MONEY_WORD_RE.finditer(text):
         if _claim(m):
-            out.append(Number(m.group(0).strip(), _to_float(m.group(1)) * _MONEY_WORD_MAG[m.group(2).lower()], "money_millions"))
+            out.append((m.start(), Number(m.group(0).strip(), _to_float(m.group(1)) * _MONEY_WORD_MAG[m.group(2).lower()], "money_millions")))
     for m in _DOLLARS_RE.finditer(text):
         if _claim(m):
-            out.append(Number(m.group(0).strip(), _to_float(m.group(1)), "dollars"))
+            out.append((m.start(), Number(m.group(0).strip(), _to_float(m.group(1)), "dollars")))
     for m in _PCT_RE.finditer(text):
         if _claim(m):
-            out.append(Number(m.group(0).strip(), _to_float(m.group(1)), "percent"))
+            out.append((m.start(), Number(m.group(0).strip(), _to_float(m.group(1)), "percent")))
     for m in _RATIO_RE.finditer(text):
         if _claim(m):
-            out.append(Number(m.group(0).strip(), _to_float(m.group(1)), "ratio"))
+            out.append((m.start(), Number(m.group(0).strip(), _to_float(m.group(1)), "ratio")))
     return out
 
 
+def extract_numbers(text: str) -> list[Number]:
+    """Extract only UNIT-BEARING numbers. Bare integers, counts, and 4-digit
+    years are deliberately ignored (primary false-positive defense)."""
+    if not text:
+        return []
+    return [num for _, num in _iter_number_matches(text)]
+
+
+def _nearest_year(start: int, year_positions: list[tuple[int, int]]) -> int | None:
+    """Pick the fiscal year for a number at offset `start`. Prefer the closest
+    year token AT OR AFTER the number ('$391,035M in FY2024' — the dominant prose
+    pattern, and how tool lines read: 'Revenue: 391,035M  (Sep 28, 2024)'); fall
+    back to the closest year before it ('FY2024 revenue was $391,035M')."""
+    if not year_positions:
+        return None
+    after = [(pos, yr) for pos, yr in year_positions if pos >= start]
+    if after:
+        return min(after, key=lambda py: py[0] - start)[1]
+    return min(year_positions, key=lambda py: start - py[0])[1]
+
+
 def extract_year_bound_numbers(text: str) -> list[tuple[int | None, Number]]:
-    """Pair each unit-bearing number with the fiscal year on its own line, if any.
-    A line like 'Revenue: 391,035M  (Sep 28, 2024)' -> (2024, <391035 money>).
-    When no year token is on the line, the year is None (any-year matching)."""
+    """Pair each unit-bearing number with its nearest fiscal year, per line.
+
+    Year association is PROXIMITY-based, not last-year-wins: a sentence like
+    '$391,035M in FY2024 and $383,285M in FY2023' binds each figure to its own
+    year. When no year token is on the line, the year is None (any-year match)."""
     out: list[tuple[int | None, Number]] = []
     for line in text.splitlines():
-        years = _YEAR_RE.findall(line)
-        year = int(years[-1]) if years else None  # date "Sep 28, 2024" -> 2024
-        for num in extract_numbers(line):
-            out.append((year, num))
+        year_positions = [(m.start(1), int(m.group(1))) for m in _YEAR_RE.finditer(line)]
+        for start, num in _iter_number_matches(line):
+            out.append((_nearest_year(start, year_positions), num))
     return out
 
 
