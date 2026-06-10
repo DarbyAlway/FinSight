@@ -33,6 +33,7 @@ from agents.news import run as run_news
 from agents.calc import run as run_calc
 from agents.ratios import run as run_ratios
 from prompts import PLAN_SYSTEM, SYNTHESIS_SYSTEM, TIME_SENSITIVE_KEYWORDS
+from langgraph.types import Send
 from tools.search_guardrails import is_uncertain, _web_search_with_sources, agents_returned_nothing
 from tools.groups import detect_group_in_query
 from tools.resolve import validate_tickers
@@ -90,6 +91,53 @@ def _web_synthesis_messages(
             "answer, say so plainly."
         )},
     ]
+
+
+def _route_after_gates(state: dict):
+    """Fan out one Send per planned agent, or skip straight to collect."""
+    agents_to_run = state.get("agents_to_run") or []
+    if not agents_to_run:
+        return "collect"
+    tickers = state.get("tickers") or []
+    ticker_hint = f"[Use exactly these tickers: {', '.join(tickers)}]\n" if tickers else ""
+    agent_input = ticker_hint + state["user_input"]
+    return [
+        Send("agent", {
+            "agent_name": name,
+            "agent_input": agent_input,
+            "history": state.get("history", []),
+            "tickers": tickers,
+        })
+        for name in agents_to_run
+    ]
+
+
+def _route_after_collect(state: dict) -> str:
+    return "proactive_web" if state.get("intent") == "market_news" else "synthesize"
+
+
+def _route_after_synthesis(state: dict) -> str:
+    """market_news is web-sourced → finalize directly (never fidelity-checked).
+    Empty/uncertain agent data → web fallback. Grounded + tool blocks → fidelity."""
+    if state.get("intent") == "market_news":
+        return "finalize"
+    agents_to_run = state.get("agents_to_run") or []
+    if agents_to_run and (
+        agents_returned_nothing(state.get("agent_results") or {})
+        or is_uncertain(state.get("answer", ""), threshold=0.85)
+    ):
+        return "web_fallback"
+    if state.get("agent_tool_blocks"):
+        return "fidelity_check"
+    return "finalize"
+
+
+def _route_after_fidelity(state: dict) -> str:
+    return "self_critique" if state.get("hard_raws") else "finalize"
+
+
+def _route_after_critique(state: dict) -> str:
+    return "web_escalate" if state.get("hard_raws") else "finalize"
 
 
 def _is_time_sensitive(question: str) -> bool:
