@@ -70,6 +70,28 @@ def _parse_plan(content: str) -> dict:
     return parsed
 
 
+def _web_synthesis_messages(
+    synth_sys: str, history: list[dict], user_input: str, snippets: str
+) -> list[dict]:
+    """Build synthesis messages for answering FROM WEB RESULTS. Deliberately
+    rebuilt from scratch: reusing the agent-grounded messages leaks the
+    'using ONLY the agent outputs' instruction, which overrides the web snippets
+    (live failure: escalation searched the web, then the answer still said the
+    data was 'not provided in the agent outputs')."""
+    return [
+        {"role": "system", "content": synth_sys},
+        *history,
+        {"role": "user", "content": (
+            f"Question: {user_input}\n\n"
+            f"Live web search results:\n{snippets}\n\n"
+            "The internal data sources could not answer this question. Answer it "
+            "using the web search results above — figures from these results are "
+            "allowed and take precedence here. If the results do not contain the "
+            "answer, say so plainly."
+        )},
+    ]
+
+
 def _is_time_sensitive(question: str) -> bool:
     q = question.lower()
     return any(kw in q for kw in TIME_SENSITIVE_KEYWORDS)
@@ -102,7 +124,8 @@ def process_turn(
     messages: list[dict],
     persona_system: str | None = None,
 ) -> tuple[str, list[dict]]:
-    today_str = date.today().strftime("%B %d, %Y") if _is_time_sensitive(user_input) else ""
+    time_sensitive = _is_time_sensitive(user_input)
+    today_str = date.today().strftime("%B %d, %Y") if time_sensitive else ""
     today_prefix = f"Today is {today_str}. " if today_str else ""
     plan_sys = PLAN_SYSTEM.replace("{today}", today_prefix)
     synth_sys = (persona_system or SYNTHESIS_SYSTEM).replace("{today}", today_prefix)
@@ -212,17 +235,26 @@ def process_turn(
             if tool_blocks:
                 agent_tool_blocks[name] = tool_blocks
 
-    # Preserve plan order in accumulated context
+    # Preserve plan order in accumulated context. Headers are neutral source
+    # labels, NOT agent names — gpt-oss cites block headers verbatim in answers
+    # (a user saw 【FINANCIALS AGENT】), and the prompt rule alone doesn't stop it.
+    source_labels = {
+        "financials": "MARKET DATA",
+        "news": "NEWS",
+        "calc": "CALCULATIONS",
+        "ratios": "SEC RATIOS",
+    }
     for name in agents_to_run:
         if name in agent_results:
-            accumulated_context += f"\n\n[{name.upper()} AGENT]\n{agent_results[name]}"
+            label = source_labels.get(name, name.upper())
+            accumulated_context += f"\n\n[{label}]\n{agent_results[name]}"
 
     # I5 proactive: market_news queries need live web data the local cache
     # cannot provide ("why is the market down today"). Search up front and feed
     # the results into synthesis as a source block.
     proactive_web_urls: list[str] = []
     if intent == "market_news":
-        web_snippets, proactive_web_urls = _web_search_with_sources(user_input)
+        web_snippets, proactive_web_urls = _web_search_with_sources(user_input, time_sensitive=time_sensitive)
         if web_snippets:
             accumulated_context += f"\n\n[WEB SEARCH RESULTS]\n{web_snippets}"
             logging.info("[Orchestrator] market_news → proactive web search (%d sources)", len(proactive_web_urls))
@@ -246,19 +278,18 @@ def process_turn(
     logging.info("[Synthesis] model=%s agents_context=%d chars", MODEL_SYNTHESIS, len(accumulated_context))
     answer, synth_tokens = _synthesis_step(synthesis_messages)
     logging.info("[Synthesis] output preview: %s", answer[:120].replace("\n", " "))
+    web_used = False  # web-sourced answers must skip tool-block fidelity checks
     if intent == "market_news":
         if proactive_web_urls:
             answer += "\n\n**Web sources:**\n" + "\n".join(f"- {url}" for url in proactive_web_urls)
     elif agents_to_run and (agents_returned_nothing(agent_results) or is_uncertain(answer, threshold=0.85)):
-        snippets, urls = _web_search_with_sources(user_input)
+        snippets, urls = _web_search_with_sources(user_input, time_sensitive=time_sensitive)
         if snippets:
-            web_messages = synthesis_messages + [{
-                "role": "user",
-                "content": f"Web search results:\n{snippets}\n\nUse these to answer the question.",
-            }]
+            web_messages = _web_synthesis_messages(synth_sys, messages, user_input, snippets)
             fallback_answer, fallback_tokens = _synthesis_step(web_messages)
             answer = fallback_answer or answer
             synth_tokens += fallback_tokens
+            web_used = True
             logging.info("[Synthesis] web-fallback output preview: %s", answer[:120].replace("\n", " "))
             if urls:
                 answer += "\n\n**Web sources:**\n" + "\n".join(f"- {url}" for url in urls)
@@ -266,8 +297,10 @@ def process_turn(
     logging.info("[timing] synthesis call: %.2fs", time.time() - t2)
 
     # Phase 2 (#14): year-aware number-fidelity check. We only have grounding when
-    # agents actually returned tool outputs; skip market_news (web-sourced figures).
-    if intent != "market_news" and agent_tool_blocks:
+    # agents actually returned tool outputs; skip web-sourced answers (market_news
+    # and the reactive web fallback) — their figures are legitimately untraceable
+    # in the agents' tool blocks.
+    if intent != "market_news" and not web_used and agent_tool_blocks:
         merged_blocks: dict[str, str] = {}
         for blocks in agent_tool_blocks.values():
             merged_blocks.update(blocks)
@@ -308,6 +341,36 @@ def process_turn(
                     )
             logging.info("[fidelity] checked answer: %d untraced unit-bearing number(s)", len(mismatches))
             _score_fidelity(len(mismatches))
+            # Escalation: HARD misses SURVIVED the self-critique — the model
+            # re-fabricated, which means the agents demonstrably cannot support
+            # this answer (live case: 'tech stocks down ~20% this week' — no tool
+            # has weekly price change). Re-answer from the web; if the web has
+            # nothing either, disclose the unverified figures instead of shipping
+            # them silently.
+            hard_after = [m for m in mismatches if m.hard]
+            if hard and hard_after:
+                bad_after = ", ".join(sorted({m.number.raw for m in hard_after}))
+                logging.warning(
+                    "[fidelity] %d HARD mismatch(es) [%s] survived self-critique → web escalation",
+                    len(hard_after), bad_after,
+                )
+                snippets, urls = _web_search_with_sources(user_input, time_sensitive=time_sensitive)
+                if snippets:
+                    web_messages = _web_synthesis_messages(synth_sys, messages, user_input, snippets)
+                    web_answer, web_tokens = _synthesis_step(web_messages)
+                    synth_tokens += web_tokens
+                    if web_answer:
+                        answer = web_answer
+                        if urls:
+                            answer += "\n\n**Web sources:**\n" + "\n".join(f"- {url}" for url in urls)
+                        logging.info("[fidelity] escalation: web-grounded re-answer (%d sources)", len(urls))
+                else:
+                    answer += (
+                        "\n\n**Data caveat:** the figures "
+                        f"[{bad_after}] could not be verified against the fetched data — "
+                        "treat them as unreliable."
+                    )
+                    logging.warning("[fidelity] escalation: web empty — shipped with unverified-figures caveat")
 
     total_tokens = plan_tokens + agent_tokens_total + synth_tokens
     logging.info("[tokens] plan=%d agents=%d synthesis=%d total=%d",

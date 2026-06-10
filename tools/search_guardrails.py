@@ -216,7 +216,13 @@ def web_search_fallback(query: str) -> str:
         return ""
 
 
-def _web_search_with_sources(query: str) -> tuple[str, list[str]]:
+def _web_search_with_sources(query: str, time_sensitive: bool = False) -> tuple[str, list[str]]:
+    """Search with ADVANCED depth: basic-depth snippets are headline fragments
+    (live A/B 2026-06-10: basic gave a 52-week factoid + a 2025 article for a
+    'past week' query; advanced gave current coverage with price-change tables).
+    `time_sensitive=True` restricts results to the past week — without it, stale
+    articles rank for 'this week' questions. raw_content is deliberately not
+    requested (15-50KB of nav/cookie boilerplate per page)."""
     api_key = os.getenv("TAVILY_API_KEY")
     if not api_key:
         logging.warning("_web_search_with_sources: TAVILY_API_KEY not set, skipping")
@@ -224,11 +230,15 @@ def _web_search_with_sources(query: str) -> tuple[str, list[str]]:
     try:
         import time as _time
         t0 = _time.perf_counter()
-        result = TavilyClient(api_key).search(query, max_results=3)
+        kwargs = {"max_results": 3, "search_depth": "advanced"}
+        if time_sensitive:
+            kwargs["time_range"] = "week"
+        result = TavilyClient(api_key).search(query, **kwargs)
         results = result.get("results", [])
         snippets = "\n\n".join(r.get("content", "") for r in results)
         urls = [r.get("url", "") for r in results if r.get("url")]
-        logging.info("_web_search_with_sources('%s') → %.2fs (%d results)", query, _time.perf_counter() - t0, len(results))
+        logging.info("_web_search_with_sources('%s', time_sensitive=%s) → %.2fs (%d results)",
+                     query, time_sensitive, _time.perf_counter() - t0, len(results))
         return snippets, urls
     except Exception as e:
         logging.warning("_web_search_with_sources failed: %s", e)

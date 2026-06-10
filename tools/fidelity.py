@@ -96,7 +96,9 @@ def _nearest_year(start: int, year_positions: list[tuple[int, int]]) -> int | No
     return min(year_positions, key=lambda py: start - py[0])[1]
 
 
-def extract_year_bound_numbers(text: str) -> list[tuple[int | None, Number]]:
+def extract_year_bound_numbers(
+    text: str, inherit_block_year: bool = False
+) -> list[tuple[int | None, Number]]:
     """Pair each unit-bearing number with its fiscal year, per line.
 
     Two phrasings are handled:
@@ -106,11 +108,22 @@ def extract_year_bound_numbers(text: str) -> list[tuple[int | None, Number]]:
         when N year tokens ALL precede N same-kind values, they bind IN ORDER
         (i-th year <-> i-th value). Without this, all values fall back to the last
         preceding year and the earlier ones false-flag.
-    When no year token is on the line, the year is None (any-year match)."""
+    When no year token is on the line, the year is None (any-year match) —
+    UNLESS inherit_block_year is set: then the line inherits the most recent
+    year seen on a previous line. The cash-flow/balance-sheet tool formats put
+    the date on a header line ('  Dec 31, 2025') with figures below it; without
+    inheritance every such figure loses its year. Grounding-only — answers keep
+    per-line binding so yearless prose stays on the lenient any-year match."""
     out: list[tuple[int | None, Number]] = []
+    block_year: int | None = None
     for line in text.splitlines():
         year_positions = sorted((m.start(1), int(m.group(1))) for m in _YEAR_RE.finditer(line))
+        if year_positions:
+            block_year = year_positions[-1][1]
         nums = _iter_number_matches(line)
+        if inherit_block_year and not year_positions and block_year is not None:
+            out.extend((block_year, num) for _, num in nums)
+            continue
 
         # Enumeration pass: per kind, if #years == #values and every year token
         # comes before every value of that kind, bind them positionally.
@@ -150,7 +163,7 @@ def build_grounding(tool_blocks: dict[str, str]):
     for block in (tool_blocks or {}).values():
         if not isinstance(block, str):
             continue
-        for year, num in extract_year_bound_numbers(block):
+        for year, num in extract_year_bound_numbers(block, inherit_block_year=True):
             any_year[num.kind].add(num.value)
             if year is not None:
                 by_year[(year, num.kind)].add(num.value)
@@ -171,6 +184,7 @@ def verify(answer: str, tool_blocks: dict[str, str], rel_tol: float = 0.01) -> l
     grounded FOR THAT YEAR; a number with no year falls back to any-year matching.
     Pure + flag-only — never mutates `answer`."""
     by_year, any_year = build_grounding(tool_blocks)
+    grounded_years = {y for (y, _kind) in by_year}
     mismatches: list[Mismatch] = []
     for year, num in extract_year_bound_numbers(answer):
         if year is not None:
@@ -181,5 +195,13 @@ def verify(answer: str, tool_blocks: dict[str, str], rel_tol: float = 0.01) -> l
             # HARD when the value is real for NO fetched year (likely fabricated);
             # SOFT when it matches some other year (mislabel or list phrasing).
             hard = not _close(num.value, any_year.get(num.kind, set()), rel_tol)
+            # A figure bound to a year the tools NEVER returned cannot be a
+            # mislabel-between-fetched-years — it is prior knowledge even when
+            # its value coincides with a fetched year's (AAPL FY2022 revenue is
+            # within 1% of FY2024's). Coverage windows differ per ticker/turn,
+            # so the year set is derived from THIS query's grounding. Skipped
+            # when the grounding carries no year info at all (can't judge).
+            if year is not None and grounded_years and year not in grounded_years:
+                hard = True
             mismatches.append(Mismatch(number=num, year=year, hard=hard))
     return mismatches

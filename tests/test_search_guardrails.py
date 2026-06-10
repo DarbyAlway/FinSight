@@ -1,4 +1,46 @@
+from unittest.mock import MagicMock, patch
+
 from tools.search_guardrails import agents_returned_nothing
+
+
+# ----------------------------------------------------------------------------
+# Tavily params (live evidence 2026-06-10, same query both modes): basic depth
+# returned a 52-week-high factoid, a YouTube blurb, and a 2025 article for a
+# "past week" query; advanced depth + time_range=week returned current CNBC
+# coverage and price-change tables that answer it. raw_content is deliberately
+# NOT requested — it is 15-50KB of nav/cookie boilerplate per page.
+# ----------------------------------------------------------------------------
+
+def test_web_search_time_sensitive_uses_advanced_depth_and_week_filter(monkeypatch):
+    from tools import search_guardrails as sg
+    monkeypatch.setenv("TAVILY_API_KEY", "test-key")
+    fake = MagicMock()
+    fake.search.return_value = {"results": [
+        {"content": "| MU | -7.74% |", "url": "https://barchart.com/x"},
+    ]}
+    with patch.object(sg, "TavilyClient", return_value=fake):
+        snippets, urls = sg._web_search_with_sources(
+            "tech stocks down 20% past week", time_sensitive=True)
+
+    kwargs = fake.search.call_args.kwargs
+    assert kwargs["search_depth"] == "advanced"
+    assert kwargs["time_range"] == "week"
+    assert not kwargs.get("include_raw_content")
+    assert "| MU | -7.74% |" in snippets
+    assert urls == ["https://barchart.com/x"]
+
+
+def test_web_search_evergreen_query_has_no_time_filter(monkeypatch):
+    from tools import search_guardrails as sg
+    monkeypatch.setenv("TAVILY_API_KEY", "test-key")
+    fake = MagicMock()
+    fake.search.return_value = {"results": [{"content": "PEG explained", "url": "https://inv.com"}]}
+    with patch.object(sg, "TavilyClient", return_value=fake):
+        sg._web_search_with_sources("what is LITE PEG ratio")  # default: not time-sensitive
+
+    kwargs = fake.search.call_args.kwargs
+    assert kwargs["search_depth"] == "advanced"
+    assert "time_range" not in kwargs
 
 
 def test_empty_results_is_nothing():

@@ -19,4 +19,4 @@ SYNONYMS = {
 MODEL = "gpt-oss-120b"
 MODEL_AGENT = "gpt-oss-120b"                      # agents — $0.22/$0.59 per M, tool calling confirmed
 MODEL_PLAN = "Meta-Llama-3.3-70B-Instruct"       # planner — reliable JSON
-MODEL_SYNTHESIS = "Meta-Llama-3.3-70B-Instruct"  # synthesis — reliable long-form
+MODEL_SYNTHESIS = "gpt-oss-120b"  # synthesis — switched from Llama-3.3-70B 2026-06-10; both pass the FY2022 probe with the year-coverage prompt rule, gpt-oss is cheaper

@@ -390,3 +390,160 @@ def test_reactive_fallback_not_fired_on_real_data():
         process_turn("AAPL revenue?", [])
 
     mock_search.assert_not_called()
+
+
+# ----------------------------------------------------------------------------
+# Escalation (live case 2026-06-10): "tech stocks that dropped ~20% this week".
+# No tool provides weekly price change, so synthesis fabricated WoW percents and
+# kept them THROUGH the self-critique ("after self-critique: 9 untraced (9
+# hard)") — and the answer shipped. When HARD mismatches survive the critique,
+# the agents demonstrably cannot support the answer: escalate to web search,
+# or disclose the unverified figures if the web has nothing.
+# ----------------------------------------------------------------------------
+
+def test_fidelity_escalates_to_web_when_critique_fails():
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"intent": "specific_tickers", "agents": ["financials"], "tickers": ["AAPL"]})
+    tool_blocks = {"get_company_info({})": "Current Price: $290.55"}
+    fabricated = "AAPL fell 20.3% this week."
+    still_bad = "AAPL declined roughly 20.3% week-over-week."
+    web_answer = "Per Reuters, AAPL fell 4.1% this week."
+
+    with patch("orchestrator.llm_chat", side_effect=[
+            (plan_json, 0), (fabricated, 0), (still_bad, 0), (web_answer, 0)]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator._web_search_with_sources",
+               return_value=("AAPL weekly change -4.1% (Reuters).", ["https://reuters.com/aapl"])) as mock_search, \
+         patch("orchestrator.run_financials", return_value=("## AAPL\nCurrent Price: $290.55", 0, tool_blocks)):
+        result, _ = process_turn("which tech stocks dropped about 20 percent this week?", [])
+
+    # 'this week' makes the query time-sensitive → search must use the week filter
+    mock_search.assert_called_once_with(
+        "which tech stocks dropped about 20 percent this week?", time_sensitive=True)
+    assert "Reuters" in result
+    assert "https://reuters.com/aapl" in result
+    assert "20.3%" not in result  # fabricated figure must NOT ship
+
+
+def test_fidelity_no_escalation_when_critique_fixes():
+    """When the self-critique rewrite is clean, no web escalation fires."""
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"intent": "specific_tickers", "agents": ["financials"], "tickers": ["MSFT"]})
+    tool_blocks = {"get_income_statement({})": "Total revenue: 281,724M  (Jun 30, 2025)"}
+    mock_search = MagicMock()
+
+    with patch("orchestrator.llm_chat", side_effect=[
+            (plan_json, 0),
+            ("MSFT FY2020 revenue was $143,015 million.", 0),          # HARD
+            ("MSFT FY2020 revenue is not available in the data.", 0),  # clean fix
+    ]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator._web_search_with_sources", mock_search), \
+         patch("orchestrator.run_financials", return_value=("## MSFT\nRevenue: 281,724M  (Jun 30, 2025)", 0, tool_blocks)):
+        process_turn("MSFT FY2020 revenue?", [])
+
+    mock_search.assert_not_called()
+
+
+def test_fidelity_escalation_discloses_when_web_empty():
+    """Persistent HARD misses + empty web results → ship with an explicit
+    unverified-figures caveat rather than silently."""
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"intent": "specific_tickers", "agents": ["financials"], "tickers": ["AAPL"]})
+    tool_blocks = {"get_company_info({})": "Current Price: $290.55"}
+
+    with patch("orchestrator.llm_chat", side_effect=[
+            (plan_json, 0),
+            ("AAPL fell 20.3% this week.", 0),
+            ("AAPL declined roughly 20.3% week-over-week.", 0)]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator._web_search_with_sources", return_value=("", [])), \
+         patch("orchestrator.run_financials", return_value=("## AAPL\nCurrent Price: $290.55", 0, tool_blocks)):
+        result, _ = process_turn("which tech stocks dropped about 20 percent this week?", [])
+
+    assert "could not be verified" in result
+
+
+def test_web_fallback_answer_skips_fidelity(caplog):
+    """An answer regenerated from WEB results must not be verified against the
+    agents' tool blocks (web figures are legitimately untraceable there)."""
+    import logging
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"intent": "specific_tickers", "agents": ["financials"], "tickers": ["LITE"]})
+    tool_blocks = {"get_company_info({})": "No company info found for LITE."}
+
+    with patch("orchestrator.llm_chat", side_effect=[
+            (plan_json, 0),
+            ("There is no information available.", 0),
+            ("LITE fell 5.2% this week per Reuters.", 0)]), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator._web_search_with_sources",
+               return_value=("LITE weekly -5.2% (Reuters).", ["https://r.com/lite"])), \
+         patch("orchestrator.run_financials",
+               return_value=("## LITE\nERROR: No company info for LITE", 0, tool_blocks)):
+        with caplog.at_level(logging.WARNING):
+            process_turn("how did LITE do this week?", [])
+
+    assert not any("untraced number" in r.message.lower() for r in caplog.records)
+
+
+def test_context_headers_are_neutral_source_labels():
+    """gpt-oss cites block headers verbatim (【FINANCIALS AGENT】 leaked to a
+    user). Headers must be neutral source labels, never '<NAME> AGENT'."""
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"intent": "specific_tickers", "agents": ["financials"], "tickers": ["AAPL"]})
+    mock_llm = MagicMock(side_effect=[(plan_json, 0), ("AAPL price is $290.55.", 0)])
+
+    with patch("orchestrator.llm_chat", mock_llm), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator._web_search_with_sources", MagicMock()), \
+         patch("orchestrator.run_financials", return_value=("## AAPL\nCurrent Price: $290.55", 0, {})):
+        process_turn("AAPL price?", [])
+
+    synthesis_messages = mock_llm.call_args_list[1].args[1]
+    context = synthesis_messages[-1]["content"]
+    assert "AGENT]" not in context
+    assert "[MARKET DATA]" in context
+
+
+def test_web_synthesis_authorizes_web_figures():
+    """Live failure 2026-06-10: escalation searched the web but the re-answer
+    said 'not provided in the agent outputs' — the web re-synthesis inherited
+    the 'using ONLY the agent outputs' instruction, which overrides the web
+    snippets. Web-grounded synthesis must NOT carry that instruction and must
+    explicitly authorize answering from the web results."""
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"intent": "specific_tickers", "agents": ["financials"], "tickers": ["AAPL"]})
+    tool_blocks = {"get_company_info({})": "Current Price: $290.55"}
+    mock_llm = MagicMock(side_effect=[
+        (plan_json, 0),
+        ("AAPL fell 20.3% this week.", 0),                  # HARD
+        ("AAPL declined roughly 20.3% week-over-week.", 0),  # critique fails
+        ("Per Reuters, AAPL fell 4.1% this week.", 0),       # web re-answer
+    ])
+
+    with patch("orchestrator.llm_chat", mock_llm), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator._web_search_with_sources",
+               return_value=("AAPL weekly change -4.1% (Reuters).", ["https://reuters.com/aapl"])), \
+         patch("orchestrator.run_financials", return_value=("## AAPL\nCurrent Price: $290.55", 0, tool_blocks)):
+        process_turn("which tech stocks dropped about 20 percent this week?", [])
+
+    web_call_messages = mock_llm.call_args_list[3].args[1]
+    final_user_content = web_call_messages[-1]["content"]
+    assert "ONLY the agent outputs" not in final_user_content
+    assert "AAPL weekly change -4.1%" in final_user_content  # snippets present
+    assert "web search results" in final_user_content.lower()
+    # no earlier message in the web call may demand agent-outputs-only either
+    assert not any("ONLY the agent outputs" in m.get("content", "") for m in web_call_messages)
+
+
+def test_synthesis_prompt_allows_web_result_figures():
+    from prompts import SYNTHESIS_SYSTEM
+    assert "web search results" in SYNTHESIS_SYSTEM.lower()

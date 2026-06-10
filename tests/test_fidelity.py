@@ -252,6 +252,101 @@ def test_enumeration_correct_answer_not_flagged():
     assert verify(answer, blocks) == []
 
 
+# ----------------------------------------------------------------------------
+# Out-of-coverage-year hallucination (live-reported): grounding covers
+# FY2023-FY2025 only, but synthesis answers with FY2022 figures recalled from
+# pretraining. Apple's REAL FY2022 revenue ($394.3B) is within 1% of FY2024's
+# $391,035M, so the value-only check calls it soft and the self-critique never
+# fires. A figure bound to a year the tools never returned cannot be a
+# mislabel-between-fetched-years — it must be HARD.
+# ----------------------------------------------------------------------------
+
+from tools.fidelity import build_grounding
+from tools.cash_flow import get_cash_flow_statement
+
+_CF_BLOCK = get_cash_flow_statement("KO")  # real 10-K cash flow, cached
+
+
+def test_grounding_years_are_dynamic_not_hardcoded():
+    # Coverage windows differ per ticker (AAPL 2023-2025; ARM/SNOW 2024-2026),
+    # so the year set must come from THIS query's tool blocks.
+    by_year, _ = build_grounding(_TOOL_BLOCKS)
+    years = {y for (y, _k) in by_year}
+    assert 2023 in years and 2025 in years
+    assert 2022 not in years
+
+
+def test_out_of_coverage_year_is_hard():
+    ms = verify("In FY2022, Apple reported revenue of $394.3 billion.", _TOOL_BLOCKS)
+    assert len(ms) == 1
+    assert ms[0].year == 2022
+    assert ms[0].hard is True  # 2022 was never fetched — prior knowledge
+
+
+def test_out_of_coverage_future_year_is_hard():
+    # Real FY2025 value relabeled to a year beyond coverage must also be HARD.
+    ms = verify("FY2030 revenue is projected at $416,161M.", _TOOL_BLOCKS)
+    assert len(ms) == 1
+    assert ms[0].hard is True
+
+
+def test_in_coverage_mislabel_stays_soft():
+    # Guard: the out-of-coverage rule must NOT harden in-coverage mislabels
+    # (FY2025 is fetched; 383,058M matches FY2023) — re-prompt churn risk.
+    ms = verify("FY2025 net sales were $383,058M", _TOOL_BLOCKS)
+    assert len(ms) == 1
+    assert ms[0].hard is False
+
+
+def test_yearless_grounding_keeps_year_claims_soft():
+    # When the grounding carries NO year tokens at all, the verifier cannot
+    # judge year claims — a correct value with a year label must stay SOFT
+    # (flag-only), never trigger the self-critique re-prompt.
+    blocks = {"calculate_current_ratio({})": "Current ratio: 1.85x"}
+    ms = verify("Current ratio was 1.85x in FY2024", blocks)
+    assert len(ms) == 1
+    assert ms[0].hard is False
+
+
+# ----------------------------------------------------------------------------
+# Block-scoped year binding: the cash-flow (and balance-sheet) tool formats put
+# the date on a HEADER line ("  Dec 31, 2025") with the figures on the lines
+# below. Per-line year binding loses the year, so every year-labeled cash-flow
+# figure in an answer false-flags soft today — and would false-HARD under the
+# out-of-coverage rule. Header years must be inherited by following lines when
+# building grounding.
+# ----------------------------------------------------------------------------
+
+def test_cash_flow_header_year_inherited_in_grounding():
+    by_year, _ = build_grounding({"get_cash_flow_statement({})": _CF_BLOCK})
+    years = {y for (y, _k) in by_year}
+    assert years, "cash-flow grounding lost all year bindings"
+
+
+def test_correct_year_labeled_cash_flow_answer_not_flagged():
+    # Real KO FY2025 figure from the 10-K, under the "Dec 31, 2025" header:
+    # "Net Cash Provided by Operating Activities: $7,408M"
+    blocks = {"get_cash_flow_statement({})": _CF_BLOCK}
+    assert verify("Operating cash flow was $7,408M in FY2025", blocks) == []
+
+
+def test_answer_side_lines_do_not_inherit_years():
+    # Inheritance applies to GROUNDING only. Answer prose keeps per-line
+    # binding so a yearless sentence still gets the lenient any-year match.
+    pairs = extract_year_bound_numbers("FY2024 was strong.\nGross margin is 45.2%")
+    assert (None, 45.2, "percent") in [(y, n.value, n.kind) for y, n in pairs]
+
+
+# ----------------------------------------------------------------------------
+# Prevention (prompt side): synthesis must be told the data covers specific
+# fiscal years and that uncovered years are unavailable — not recalled.
+# ----------------------------------------------------------------------------
+
+def test_synthesis_prompt_has_year_coverage_rule():
+    from prompts import SYNTHESIS_SYSTEM
+    assert "fiscal year that is not in the agent outputs" in SYNTHESIS_SYSTEM
+
+
 def test_enumeration_does_not_mask_real_mislabel():
     # A genuine year-mislabel inside an enumeration must STILL flag: here the
     # FY2024 slot carries 999,999M, which is real for no MSFT year.
