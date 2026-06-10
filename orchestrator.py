@@ -336,7 +336,7 @@ def _self_critique_node(state: dict) -> dict:
         mismatches = verify_fidelity(answer, merged_blocks)
         hard_raws = sorted({m.number.raw for m in mismatches if m.hard})
         logging.info("[fidelity] after self-critique: %d untraced (%d hard)",
-                     len(mismatches), len(hard_raws))
+                     len(mismatches), sum(1 for m in mismatches if m.hard))
         logging.info("[fidelity] checked answer: %d untraced unit-bearing number(s)", len(mismatches))
         _score_fidelity(len(mismatches))
     return {"answer": answer, "hard_raws": hard_raws, "critique_done": True,
