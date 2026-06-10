@@ -35,17 +35,26 @@ START → plan → gates ─┬─(agents=[])───────────�
                                      (market_news?) proactive_web
                                                        ↓
                                                   synthesize
-                                                       ↓
-                              (empty/uncertain?) web_fallback ───────→ finalize
-                                                       ↓ (grounded)       ↑
-                                                fidelity_check ─(clean/soft)┤
-                                                       ↓ (HARD, 1st pass)  │
-                                              self_critique → fidelity_recheck ─(clean)→ finalize
-                                                                  ↓ (HARD survived)
-                                                           web_escalate ──→ finalize
-                                              (search → web-grounded answer, or
-                                               unverified-figures caveat if web empty)
+                                                       │
+        ┌─(market_news: web-sourced, append sources)───┼──────────→ finalize
+        │                                              │
+        │                     (empty/uncertain?) web_fallback ────→ finalize
+        │                                              ↓ (grounded)    ↑
+        │                                       fidelity_check ─(clean/soft)
+        │                                              ↓ (HARD, 1st pass)
+        │                                     self_critique → fidelity_recheck ─(clean)→ finalize
+        │                                                         ↓ (HARD survived)
+        │                                                  web_escalate ──→ finalize
+        │                                     (search → web-grounded answer, or
+        └──────────────────────────────────── unverified-figures caveat if web empty)
 ```
+
+Routing note (parity-critical): after `synthesize`, the `market_news` path goes
+DIRECTLY to `finalize` — it must bypass `web_fallback` AND `fidelity_check`,
+because its figures are web-sourced and legitimately untraceable in the agents'
+tool blocks (today's `intent != "market_news"` / `web_used` guards). The same
+applies to any answer produced by `web_fallback` or `web_escalate`: web-grounded
+answers are never fidelity-checked against tool blocks.
 
 - `plan` node = `_plan_step` + `_parse_plan` + `_keyword_fallback`, unchanged.
 - `gates` node = Gate 1 group-manifest override + Gate 2 `validate_tickers`. Deterministic.
