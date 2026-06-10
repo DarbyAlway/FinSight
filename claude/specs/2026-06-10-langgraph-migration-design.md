@@ -132,7 +132,7 @@ All existing tests pass unchanged, plus a live `fidelity_live_check.py` run prod
 
 ## Testing
 
-Per project rules (real data; Ollama for LLM-loop integration tests, never paid SambaNova; broad edge cases; pytest needs no permission):
+Per project rules (real data; broad edge cases; pytest needs no permission; SambaNova allowed for live tests per user 2026-06-10 — keep runs purposeful):
 - Phase 1 gate: full existing suite green, zero test edits beyond imports if any.
 - New graph tests per phase: topology (which edges fire on which state), reducer merging, checkpoint resume (kill mid-run, resume, assert no agent refetch), router actions per query class, decomposition caps, HITL interrupt/resume.
 - Live checks on SambaNova only as final validation per phase.
