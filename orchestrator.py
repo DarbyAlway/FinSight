@@ -140,6 +140,242 @@ def _route_after_critique(state: dict) -> str:
     return "web_escalate" if state.get("hard_raws") else "finalize"
 
 
+_SOURCE_LABELS = {
+    "financials": "MARKET DATA",
+    "news": "NEWS",
+    "calc": "CALCULATIONS",
+    "ratios": "SEC RATIOS",
+}
+
+
+@observe(name="plan_node")
+def _plan_node(state: dict) -> dict:
+    user_input = state["user_input"]
+    time_sensitive = _is_time_sensitive(user_input)
+    today_str = date.today().strftime("%B %d, %Y") if time_sensitive else ""
+    today_prefix = f"Today is {today_str}. " if today_str else ""
+    plan_sys = PLAN_SYSTEM.replace("{today}", today_prefix)
+    synth_sys = (state.get("persona_system") or SYNTHESIS_SYSTEM).replace("{today}", today_prefix)
+
+    planning_messages = [
+        {"role": "system", "content": plan_sys},
+        *state.get("history", []),
+        {"role": "user", "content": user_input},
+    ]
+    plan_content, plan_tokens = _plan_step(planning_messages)
+    intent = None
+    try:
+        plan = _parse_plan(plan_content)
+        agents_to_run = plan.get("agents", [])
+        tickers = plan.get("tickers", [])
+        intent = plan.get("intent")
+        logging.info("[Orchestrator] plan → intent=%s agents=%s  tickers=%s  reason=%s",
+                     intent, agents_to_run, tickers, plan.get("reason", ""))
+    except (json.JSONDecodeError, ValueError):
+        logging.warning("[Orchestrator] plan JSON malformed — using keyword fallback")
+        agents_to_run = _keyword_fallback(user_input)
+        tickers = []
+        logging.info("[Orchestrator] keyword fallback → agents=%s", agents_to_run)
+    return {
+        "intent": intent, "agents_to_run": agents_to_run, "tickers": tickers,
+        "time_sensitive": time_sensitive, "synth_sys": synth_sys,
+        "tokens": {"plan": plan_tokens},
+    }
+
+
+def _gates_node(state: dict) -> dict:
+    user_input = state["user_input"]
+    tickers = list(state.get("tickers") or [])
+    agents_to_run = list(state.get("agents_to_run") or [])
+    group_tickers = detect_group_in_query(user_input)
+    if group_tickers:
+        if set(group_tickers) != set(tickers):
+            logging.info("[Gate1] manifest override: planner tickers=%s → %s", tickers, group_tickers)
+        tickers = group_tickers
+    if tickers:
+        valid_tickers, invalid_tickers = validate_tickers(tickers)
+        if invalid_tickers:
+            logging.info("[Gate2] dropped invalid/unlisted tickers %s (kept %s)",
+                         invalid_tickers, valid_tickers)
+            tickers = valid_tickers
+            if not tickers:
+                logging.info("[Gate2] all requested tickers invalid — skipping data agents")
+                agents_to_run = []
+    return {"tickers": tickers, "agents_to_run": agents_to_run}
+
+
+@observe(name="agent_node")
+def _agent_node(state: dict) -> dict:
+    # Build the map at CALL time so tests can patch orchestrator.run_financials etc.
+    agent_map = {"financials": run_financials, "news": run_news,
+                 "calc": run_calc, "ratios": run_ratios}
+    name = state["agent_name"]
+    fn = agent_map.get(name)
+    if fn is None:
+        logging.warning("[Orchestrator] unknown agent '%s' — skipping", name)
+        return {"agent_results": {}, "agent_tool_blocks": {}, "tokens": {"agents": 0}}
+    try:
+        logging.info("[Orchestrator] → calling agent: %s", name)
+        t1 = time.time()
+        result, agent_tokens, tool_blocks = fn(
+            state["agent_input"], "", history=state.get("history", []),
+            expected_tickers=state.get("tickers") or None,
+        )
+        logging.info("[Orchestrator] ✓ agent %s done (%.2fs)", name, time.time() - t1)
+        return {
+            "agent_results": {name: result} if result is not None else {},
+            "agent_tool_blocks": {name: tool_blocks} if tool_blocks else {},
+            "tokens": {"agents": agent_tokens},
+        }
+    except Exception as e:
+        logging.warning("[Orchestrator] %s agent failed — %s", name, e)
+        _log_agent_error(name, e)
+        return {"agent_results": {}, "agent_tool_blocks": {}, "tokens": {"agents": 0}}
+
+
+def _collect_node(state: dict) -> dict:
+    accumulated_context = ""
+    agent_results = state.get("agent_results") or {}
+    for name in state.get("agents_to_run") or []:
+        if name in agent_results:
+            label = _SOURCE_LABELS.get(name, name.upper())
+            accumulated_context += f"\n\n[{label}]\n{agent_results[name]}"
+    return {"accumulated_context": accumulated_context}
+
+
+def _proactive_web_node(state: dict) -> dict:
+    web_snippets, urls = _web_search_with_sources(
+        state["user_input"], time_sensitive=state.get("time_sensitive", False))
+    updates: dict = {"web_urls": urls}
+    if web_snippets:
+        updates["accumulated_context"] = (
+            state.get("accumulated_context", "") + f"\n\n[WEB SEARCH RESULTS]\n{web_snippets}")
+        logging.info("[Orchestrator] market_news → proactive web search (%d sources)", len(urls))
+    return updates
+
+
+@observe(name="synthesize_node")
+def _synthesize_node(state: dict) -> dict:
+    accumulated_context = state.get("accumulated_context", "")
+    synthesis_messages = [{"role": "system", "content": state["synth_sys"]},
+                          *state.get("history", [])]
+    if accumulated_context:
+        synthesis_messages.append({
+            "role": "user",
+            "content": (
+                f"Question: {state['user_input']}\n\n"
+                f"Agent outputs:\n{accumulated_context}\n\n"
+                "Answer the question above using ONLY the agent outputs. "
+                "Quote specific figures directly from the outputs."
+            ),
+        })
+    else:
+        synthesis_messages.append({"role": "user", "content": state["user_input"]})
+    logging.info("[Synthesis] model=%s agents_context=%d chars", MODEL_SYNTHESIS, len(accumulated_context))
+    answer, synth_tokens = _synthesis_step(synthesis_messages)
+    logging.info("[Synthesis] output preview: %s", answer[:120].replace("\n", " "))
+    return {"answer": answer, "synthesis_messages": synthesis_messages,
+            "tokens": {"synthesis": synth_tokens}}
+
+
+def _web_fallback_node(state: dict) -> dict:
+    snippets, urls = _web_search_with_sources(
+        state["user_input"], time_sensitive=state.get("time_sensitive", False))
+    if not snippets:
+        return {}
+    web_messages = _web_synthesis_messages(
+        state["synth_sys"], state.get("history", []), state["user_input"], snippets)
+    fallback_answer, fallback_tokens = _synthesis_step(web_messages)
+    answer = fallback_answer or state.get("answer", "")
+    logging.info("[Synthesis] web-fallback output preview: %s", answer[:120].replace("\n", " "))
+    if urls:
+        answer += "\n\n**Web sources:**\n" + "\n".join(f"- {url}" for url in urls)
+    logging.info("[Orchestrator] Tavily fallback used (%d sources)", len(urls))
+    return {"answer": answer, "web_used": True, "tokens": {"synthesis": fallback_tokens}}
+
+
+def _fidelity_check_node(state: dict) -> dict:
+    merged_blocks: dict = {}
+    for blocks in (state.get("agent_tool_blocks") or {}).values():
+        merged_blocks.update(blocks)
+    if not merged_blocks:
+        return {"hard_raws": []}
+    mismatches = verify_fidelity(state["answer"], merged_blocks)
+    for m in mismatches:
+        logging.warning("[fidelity] %s untraced number %r (kind=%s, year=%s)",
+                        "HARD" if m.hard else "soft", m.number.raw, m.number.kind, m.year)
+    hard_raws = sorted({m.number.raw for m in mismatches if m.hard})
+    if not hard_raws:
+        logging.info("[fidelity] checked answer: %d untraced unit-bearing number(s)", len(mismatches))
+        _score_fidelity(len(mismatches))
+    return {"hard_raws": hard_raws}
+
+
+def _self_critique_node(state: dict) -> dict:
+    merged_blocks: dict = {}
+    for blocks in (state.get("agent_tool_blocks") or {}).values():
+        merged_blocks.update(blocks)
+    bad = ", ".join(state["hard_raws"])
+    logging.warning("[fidelity] %d HARD mismatch(es) [%s] → self-critique re-prompt",
+                    len(state["hard_raws"]), bad)
+    critique_messages = state["synthesis_messages"] + [
+        {"role": "assistant", "content": state["answer"]},
+        {"role": "user", "content": (
+            f"Self-check: the figures [{bad}] in your answer do NOT appear in the agent "
+            "outputs above — they look like prior knowledge, not the provided data. "
+            "Re-read the agent outputs and rewrite your answer using ONLY figures that "
+            "appear there. For any value not present, state that it is not available "
+            "rather than estimating or recalling it."
+        )},
+    ]
+    corrected, corr_tokens = _synthesis_step(critique_messages)
+    answer = state["answer"]
+    hard_raws = state["hard_raws"]
+    if corrected:
+        answer = corrected
+        mismatches = verify_fidelity(answer, merged_blocks)
+        hard_raws = sorted({m.number.raw for m in mismatches if m.hard})
+        logging.info("[fidelity] after self-critique: %d untraced (%d hard)",
+                     len(mismatches), len(hard_raws))
+        logging.info("[fidelity] checked answer: %d untraced unit-bearing number(s)", len(mismatches))
+        _score_fidelity(len(mismatches))
+    return {"answer": answer, "hard_raws": hard_raws, "critique_done": True,
+            "tokens": {"synthesis": corr_tokens}}
+
+
+def _web_escalate_node(state: dict) -> dict:
+    bad_after = ", ".join(state["hard_raws"])
+    logging.warning("[fidelity] %d HARD mismatch(es) [%s] survived self-critique → web escalation",
+                    len(state["hard_raws"]), bad_after)
+    snippets, urls = _web_search_with_sources(
+        state["user_input"], time_sensitive=state.get("time_sensitive", False))
+    if snippets:
+        web_messages = _web_synthesis_messages(
+            state["synth_sys"], state.get("history", []), state["user_input"], snippets)
+        web_answer, web_tokens = _synthesis_step(web_messages)
+        if web_answer:
+            answer = web_answer
+            if urls:
+                answer += "\n\n**Web sources:**\n" + "\n".join(f"- {url}" for url in urls)
+            logging.info("[fidelity] escalation: web-grounded re-answer (%d sources)", len(urls))
+            return {"answer": answer, "web_used": True, "tokens": {"synthesis": web_tokens}}
+        return {"tokens": {"synthesis": web_tokens}}
+    answer = state["answer"] + (
+        "\n\n**Data caveat:** the figures "
+        f"[{bad_after}] could not be verified against the fetched data — "
+        "treat them as unreliable."
+    )
+    logging.warning("[fidelity] escalation: web empty — shipped with unverified-figures caveat")
+    return {"answer": answer}
+
+
+def _finalize_node(state: dict) -> dict:
+    answer = state.get("answer", "")
+    if state.get("intent") == "market_news" and state.get("web_urls"):
+        answer += "\n\n**Web sources:**\n" + "\n".join(f"- {url}" for url in state["web_urls"])
+    return {"answer": answer}
+
+
 def _is_time_sensitive(question: str) -> bool:
     q = question.lower()
     return any(kw in q for kw in TIME_SENSITIVE_KEYWORDS)
