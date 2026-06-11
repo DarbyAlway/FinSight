@@ -467,6 +467,34 @@ def test_fidelity_escalation_discloses_when_web_empty():
     assert "could not be verified" in result
 
 
+def test_empty_web_fallback_reenters_fidelity_chain():
+    """Parity regression (review finding): when the reactive web fallback fires
+    but Tavily returns NOTHING, the original agent-grounded answer is kept and
+    must still go through fidelity → self-critique → escalation — the legacy
+    `not web_used` guard. A fixed web_fallback→finalize edge shipped a
+    fabricated figure silently."""
+    from orchestrator import process_turn
+
+    plan_json = json.dumps({"intent": "specific_tickers", "agents": ["financials"], "tickers": ["AAPL"]})
+    tool_blocks = {"get_company_info({})": "Current Price: $290.55"}
+
+    with patch("orchestrator.llm_chat", side_effect=[
+            (plan_json, 0),
+            ("AAPL fell 20.3% this week.", 0),                   # fabricated (HARD)
+            ("AAPL declined roughly 20.3% week-over-week.", 0),  # critique re-fabricates
+    ]), \
+         patch("orchestrator.is_uncertain", return_value=True), \
+         patch("orchestrator._web_search_with_sources", return_value=("", [])) as mock_search, \
+         patch("orchestrator.run_financials", return_value=("## AAPL\nCurrent Price: $290.55", 0, tool_blocks)):
+        result, _ = process_turn("which tech stocks dropped about 20 percent this week?", [])
+
+    # web fallback fired (empty) AND escalation searched again (empty)
+    assert mock_search.call_count == 2
+    # fabricated figure did NOT ship silently — explicit disclosure required
+    assert "**Data caveat:**" in result
+    assert "could not be verified" in result
+
+
 def test_web_fallback_answer_skips_fidelity(caplog):
     """An answer regenerated from WEB results must not be verified against the
     agents' tool blocks (web figures are legitimately untraceable there)."""

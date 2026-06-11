@@ -7,8 +7,6 @@ from datetime import date
 
 from langfuse import observe
 
-import ollama
-
 _FAILURE_LOG = os.path.join(os.path.dirname(__file__), "tests", "failure_log.jsonl")
 
 
@@ -24,7 +22,7 @@ def _log_agent_error(agent_name: str, error: Exception):
     except OSError:
         pass
 
-from tools.config import MODEL, MODEL_PLAN, MODEL_SYNTHESIS
+from tools.config import MODEL_PLAN, MODEL_SYNTHESIS
 from tools.llm import llm_chat
 from agents.financials import run as run_financials
 from agents.news import run as run_news
@@ -48,8 +46,7 @@ def _score_fidelity(n_mismatches: int) -> None:
     except Exception as e:  # scoring is observability only
         logging.debug("[fidelity] score skipped: %s", e)
 
-OPT_PLAN = {"temperature": 0.0}
-OPT_SYNTH = {"temperature": 0.3}
+OPT_PLAN = {"temperature": 0.0}  # unused here, but imported by eval_models.py
 
 
 @observe(name="planner")
@@ -132,6 +129,16 @@ def _route_after_synthesis(state: dict) -> str:
     return "finalize"
 
 
+def _route_after_web_fallback(state: dict) -> str:
+    # Parity with the legacy guard `not web_used and agent_tool_blocks`: an
+    # empty Tavily result leaves the original agent-grounded answer in place,
+    # and that answer must still be fidelity-checked before shipping.
+    # (_fidelity_check_node short-circuits when no tool blocks were merged.)
+    if state.get("web_used"):
+        return "finalize"
+    return "fidelity_check"
+
+
 def _route_after_fidelity(state: dict) -> str:
     return "self_critique" if state.get("hard_raws") else "finalize"
 
@@ -162,6 +169,9 @@ def _plan_node(state: dict) -> dict:
         *state.get("history", []),
         {"role": "user", "content": user_input},
     ]
+    # Always let the planner LLM classify chat vs. financial — it returns
+    # agents=[] for greetings. (Replaces a brittle keyword heuristic that
+    # misread "analyze rocket lab" as chitchat.) Keywords are fallback only.
     plan_content, plan_tokens = _plan_step(planning_messages)
     intent = None
     try:
@@ -187,11 +197,18 @@ def _gates_node(state: dict) -> dict:
     user_input = state["user_input"]
     tickers = list(state.get("tickers") or [])
     agents_to_run = list(state.get("agents_to_run") or [])
+    # Gate 1 — group membership. If the user named a known group (MAG7, FAANG),
+    # the planner LLM can't be trusted to expand it (it produced FB/BABA and
+    # dropped META/NVDA), so override with the canonical manifest list.
     group_tickers = detect_group_in_query(user_input)
     if group_tickers:
         if set(group_tickers) != set(tickers):
             logging.info("[Gate1] manifest override: planner tickers=%s → %s", tickers, group_tickers)
         tickers = group_tickers
+    # Gate 2 — validation. Drop tickers that aren't currently-listed SEC filers
+    # (dead/renamed: TWTR, SQ, FB — or hallucinated) BEFORE dispatch. If every
+    # ticker is invalid, skip the data agents and let synthesis explain cheaply
+    # instead of burning ~17k tokens discovering a dead ticker.
     if tickers:
         valid_tickers, invalid_tickers = validate_tickers(tickers)
         if invalid_tickers:
@@ -304,6 +321,9 @@ def _fidelity_check_node(state: dict) -> dict:
     for m in mismatches:
         logging.warning("[fidelity] %s untraced number %r (kind=%s, year=%s)",
                         "HARD" if m.hard else "soft", m.number.raw, m.number.kind, m.year)
+    # A HARD miss = a figure that exists for NO fetched year, i.e. likely
+    # pulled from prior knowledge → one grounded self-critique. SOFT misses
+    # (real value, wrong/ambiguous year) stay flag-only — re-prompting risks churn.
     hard_raws = sorted({m.number.raw for m in mismatches if m.hard})
     if not hard_raws:
         logging.info("[fidelity] checked answer: %d untraced unit-bearing number(s)", len(mismatches))
@@ -312,6 +332,8 @@ def _fidelity_check_node(state: dict) -> dict:
 
 
 def _self_critique_node(state: dict) -> dict:
+    # ONE grounded self-critique only: hand the model its own answer plus the
+    # HARD-mismatched figures and have it re-check against the agent outputs.
     merged_blocks: dict = {}
     for blocks in (state.get("agent_tool_blocks") or {}).values():
         merged_blocks.update(blocks)
@@ -426,7 +448,7 @@ def build_graph(checkpointer=None):
     g.add_edge("proactive_web", "synthesize")
     g.add_conditional_edges("synthesize", _route_after_synthesis,
                             ["finalize", "web_fallback", "fidelity_check"])
-    g.add_edge("web_fallback", "finalize")
+    g.add_conditional_edges("web_fallback", _route_after_web_fallback, ["finalize", "fidelity_check"])
     g.add_conditional_edges("fidelity_check", _route_after_fidelity, ["self_critique", "finalize"])
     g.add_conditional_edges("self_critique", _route_after_critique, ["web_escalate", "finalize"])
     g.add_edge("web_escalate", "finalize")

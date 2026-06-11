@@ -36,12 +36,16 @@ class TurnState(TypedDict, total=False):
     accumulated_context: str
     synthesis_messages: list   # kept for critique/escalation re-prompts
     answer: str
-    web_used: bool
+    web_used: bool             # True once a web-grounded answer replaced the agent
+                               # answer; read by _route_after_web_fallback (empty web
+                               # result keeps the original answer → fidelity_check);
+                               # otherwise an observability/checkpoint marker
     web_urls: list             # proactive (market_news) source urls
     # fidelity control
     hard_raws: list            # raw strings of HARD-mismatched figures
     mismatch_count: int        # total untraced numbers from last verify pass
-    critique_done: bool
+    critique_done: bool        # observability/checkpoint marker only — no route reads
+                               # it (the critique is single-pass by graph topology)
     # accounting
     tokens: Annotated[dict, add_token_counts]
     # Send-payload fields (set per agent_node invocation only)

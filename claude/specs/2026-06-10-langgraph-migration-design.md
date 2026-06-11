@@ -38,9 +38,10 @@ START → plan → gates ─┬─(agents=[])───────────�
                                                        │
         ┌─(market_news: web-sourced, append sources)───┼──────────→ finalize
         │                                              │
-        │                     (empty/uncertain?) web_fallback ────→ finalize
-        │                                              ↓ (grounded)    ↑
-        │                                       fidelity_check ─(clean/soft)
+        │                     (empty/uncertain?) web_fallback ─(web used)→ finalize
+        │                                              ↓ (grounded)  ↓ (web empty)  ↑
+        │                                       fidelity_check ←─────┘              │
+        │                                              ├──────(clean/soft)──────────┘
         │                                              ↓ (HARD, 1st pass)
         │                                     self_critique → fidelity_recheck ─(clean)→ finalize
         │                                                         ↓ (HARD survived)
@@ -54,7 +55,11 @@ DIRECTLY to `finalize` — it must bypass `web_fallback` AND `fidelity_check`,
 because its figures are web-sourced and legitimately untraceable in the agents'
 tool blocks (today's `intent != "market_news"` / `web_used` guards). The same
 applies to any answer produced by `web_fallback` or `web_escalate`: web-grounded
-answers are never fidelity-checked against tool blocks.
+answers are never fidelity-checked against tool blocks. But `web_fallback` only
+skips fidelity when Tavily actually produced an answer (`web_used` set): an
+EMPTY web result keeps the original agent-grounded answer, which must still
+enter `fidelity_check` (the legacy `not web_used` guard) — hence the
+conditional edge `web_fallback → finalize | fidelity_check`.
 
 - `plan` node = `_plan_step` + `_parse_plan` + `_keyword_fallback`, unchanged.
 - `gates` node = Gate 1 group-manifest override + Gate 2 `validate_tickers`. Deterministic.

@@ -65,6 +65,21 @@ def test_route_after_synthesis_no_tool_blocks_finalizes():
         assert _route_after_synthesis(state) == "finalize"
 
 
+def test_route_after_web_fallback_web_answer_finalizes():
+    """When Tavily produced a web-grounded answer, skip fidelity (web figures
+    are legitimately untraceable in the agents' tool blocks)."""
+    from orchestrator import _route_after_web_fallback
+    assert _route_after_web_fallback({"web_used": True}) == "finalize"
+
+
+def test_route_after_web_fallback_empty_web_reenters_fidelity():
+    """Parity with the legacy `not web_used` guard: an empty Tavily result
+    keeps the original agent-grounded answer, which must still be checked."""
+    from orchestrator import _route_after_web_fallback
+    assert _route_after_web_fallback({"web_used": False}) == "fidelity_check"
+    assert _route_after_web_fallback({}) == "fidelity_check"
+
+
 def test_route_after_fidelity_hard_goes_critique():
     from orchestrator import _route_after_fidelity
     assert _route_after_fidelity({"hard_raws": ["20.3%"], "critique_done": False}) == "self_critique"
