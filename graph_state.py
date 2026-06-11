@@ -40,6 +40,7 @@ class TurnState(TypedDict, total=False):
     web_urls: list             # proactive (market_news) source urls
     # fidelity control
     hard_raws: list            # raw strings of HARD-mismatched figures
+    mismatch_count: int        # total untraced numbers from last verify pass
     critique_done: bool
     # accounting
     tokens: Annotated[dict, add_token_counts]

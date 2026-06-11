@@ -299,7 +299,7 @@ def _fidelity_check_node(state: dict) -> dict:
     for blocks in (state.get("agent_tool_blocks") or {}).values():
         merged_blocks.update(blocks)
     if not merged_blocks:
-        return {"hard_raws": []}
+        return {"hard_raws": [], "mismatch_count": 0}
     mismatches = verify_fidelity(state["answer"], merged_blocks)
     for m in mismatches:
         logging.warning("[fidelity] %s untraced number %r (kind=%s, year=%s)",
@@ -308,7 +308,7 @@ def _fidelity_check_node(state: dict) -> dict:
     if not hard_raws:
         logging.info("[fidelity] checked answer: %d untraced unit-bearing number(s)", len(mismatches))
         _score_fidelity(len(mismatches))
-    return {"hard_raws": hard_raws}
+    return {"hard_raws": hard_raws, "mismatch_count": len(mismatches)}
 
 
 def _self_critique_node(state: dict) -> dict:
@@ -331,16 +331,18 @@ def _self_critique_node(state: dict) -> dict:
     corrected, corr_tokens = _synthesis_step(critique_messages)
     answer = state["answer"]
     hard_raws = state["hard_raws"]
+    mismatch_count = state.get("mismatch_count", 0)
     if corrected:
         answer = corrected
         mismatches = verify_fidelity(answer, merged_blocks)
         hard_raws = sorted({m.number.raw for m in mismatches if m.hard})
+        mismatch_count = len(mismatches)
         logging.info("[fidelity] after self-critique: %d untraced (%d hard)",
                      len(mismatches), sum(1 for m in mismatches if m.hard))
-        logging.info("[fidelity] checked answer: %d untraced unit-bearing number(s)", len(mismatches))
-        _score_fidelity(len(mismatches))
-    return {"answer": answer, "hard_raws": hard_raws, "critique_done": True,
-            "tokens": {"synthesis": corr_tokens}}
+    logging.info("[fidelity] checked answer: %d untraced unit-bearing number(s)", mismatch_count)
+    _score_fidelity(mismatch_count)
+    return {"answer": answer, "hard_raws": hard_raws, "mismatch_count": mismatch_count,
+            "critique_done": True, "tokens": {"synthesis": corr_tokens}}
 
 
 def _web_escalate_node(state: dict) -> dict:
