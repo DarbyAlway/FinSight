@@ -507,7 +507,11 @@ def process_turn(
     tid = thread_id or uuid.uuid4().hex
     config = {"configurable": {"thread_id": tid}}
     logging.info("[turn] thread_id=%s", tid)
-    final_state = _GRAPH.invoke(initial_state, config)
+    # Resume only if the caller passed a thread_id AND that thread has pending
+    # (crashed mid-graph) nodes; otherwise run fresh. invoke(None) continues
+    # from the checkpoint without re-running completed nodes.
+    resuming = thread_id is not None and bool(_GRAPH.get_state(config).next)
+    final_state = _GRAPH.invoke(None if resuming else initial_state, config)
     answer = final_state.get("answer", "")
     tokens = final_state.get("tokens", {})
     logging.info("[tokens] plan=%d agents=%d synthesis=%d total=%d",

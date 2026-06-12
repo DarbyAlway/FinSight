@@ -79,19 +79,25 @@ class TurnState(TypedDict):
     agents_to_run: list[str]
     tickers: list[str]
     time_sensitive: bool
+    synth_sys: str  # persona/synthesis system prompt, derived once in plan
     # agent results (merged by reducers from parallel Send nodes)
     agent_results: Annotated[dict[str, str], merge_dicts]
     agent_tool_blocks: Annotated[dict[str, dict], merge_dicts]
     # synthesis
     accumulated_context: str
+    synthesis_messages: list[dict]  # kept for critique/escalation re-prompts
     answer: str
     web_used: bool
     web_urls: list[str]
     # fidelity control
-    hard_mismatches: list[str]
+    hard_raws: list[str]  # raw strings of HARD-mismatched figures
+    mismatch_count: int   # total untraced numbers from last verify pass
     critique_done: bool
     # accounting
     tokens: Annotated[dict[str, int], add_token_counts]
+    # Send-payload fields (set per agent_node invocation only)
+    agent_name: str
+    agent_input: str
 ```
 
 ### Compatibility constraints
@@ -107,7 +113,7 @@ All existing tests pass unchanged, plus a live `fidelity_live_check.py` run prod
 ## Phase 2 — Checkpointing
 
 - Compile with `SqliteSaver` from `langgraph-checkpoint-sqlite`, file `checkpoints.db` (separate from the DuckDB data cache).
-- One `thread_id` per conversation session; every node output checkpointed.
+- One `thread_id` per TURN (not per session); every node output checkpointed. Reducer channels (`agent_results`, `agent_tool_blocks`, `tokens`) merge across invokes on the same thread, so reusing a thread for a new question would leak stale agent state into routing and fidelity checks. Resume is opt-in: pass the same `thread_id` back to continue a crashed turn.
 - Win: an interrupted multi-agent run resumes at the failed node without refetching (~15k agent tokens on a MAG7 query). Prerequisite for HITL.
 
 ## Phase 3 — Structured router (activates pending Phase D)

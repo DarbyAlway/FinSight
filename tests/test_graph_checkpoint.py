@@ -4,6 +4,7 @@ import json
 import sqlite3
 from unittest.mock import patch
 
+import pytest
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 
@@ -57,3 +58,44 @@ def test_crashed_turn_resumes_without_refetching_agents(tmp_path):
 
         assert agent_calls["n"] == 1            # agent NOT refetched
         assert "391,035M" in final["answer"]
+
+
+def test_process_turn_resumes_crashed_turn_on_same_thread_id():
+    """Resume THROUGH process_turn (not the raw graph): a reused thread_id with
+    pending (crashed) nodes must invoke(None) — continuing from the checkpoint
+    instead of re-running from START and refetching agents.
+
+    Uses the module-level _GRAPH whose checkpointer is the conftest-provided
+    ``:memory:`` store — same process, same connection, so the checkpoint
+    survives between the two process_turn calls."""
+    from orchestrator import process_turn
+
+    agent_calls = {"n": 0}
+
+    def fake_financials(*a, **k):
+        agent_calls["n"] += 1
+        return ("## AAPL\nRevenue: 391,035M  (Sep 28, 2024)", 10,
+                {"get_income_statement({})": "Total revenue: 391,035M  (Sep 28, 2024)"})
+
+    # First call: synthesis LLM call explodes AFTER the agent ran; the error
+    # must propagate to the caller (no silent swallowing).
+    with patch("orchestrator.llm_chat",
+               side_effect=[_plan(["financials"], ["AAPL"]), RuntimeError("boom")]), \
+         patch("orchestrator.run_financials", side_effect=fake_financials), \
+         patch("orchestrator.validate_tickers", return_value=(["AAPL"], [])), \
+         patch("orchestrator.detect_group_in_query", return_value=None):
+        with pytest.raises(RuntimeError):
+            process_turn("AAPL revenue?", [], thread_id="turn-resume-1")
+    assert agent_calls["n"] == 1
+
+    # Second call with the same thread_id: process_turn must detect the
+    # pending checkpoint and resume — plan + agent must NOT re-run.
+    with patch("orchestrator.llm_chat",
+               side_effect=[("Revenue was 391,035M in FY2024.", 5)]), \
+         patch("orchestrator.run_financials", side_effect=fake_financials), \
+         patch("orchestrator.is_uncertain", return_value=False), \
+         patch("orchestrator._web_search_with_sources", return_value=("", [])):
+        answer, _ = process_turn("AAPL revenue?", [], thread_id="turn-resume-1")
+
+    assert agent_calls["n"] == 1            # agent NOT refetched
+    assert "391,035M" in answer

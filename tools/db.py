@@ -13,7 +13,8 @@ QUARTERLY_TTL_DAYS = 7
 EARNINGS_TTL_DAYS = 7
 
 # DuckDB allows only one writer on the database file. Agents run in parallel
-# (orchestrator ThreadPoolExecutor); when two of them each open their own
+# (LangGraph dispatches Send-fanned agent nodes on worker threads); when two
+# of them each open their own
 # connection and one writes, the others crash with "Conflict on update" or
 # "file being used by another process". Serializing every connection through
 # this process-wide lock makes concurrent cache access safe. Cache ops are

@@ -4,8 +4,9 @@ from datetime import datetime
 
 # Keep test runs out of the production checkpoint store: orchestrator opens
 # its SqliteSaver connection at import time, so the env var must be set
-# before any test imports it.
-os.environ.setdefault("CHECKPOINT_DB", ":memory:")
+# before any test imports it. Hard assignment (not setdefault) so a developer
+# with CHECKPOINT_DB exported in their shell can't have tests write to it.
+os.environ["CHECKPOINT_DB"] = ":memory:"
 
 
 def pytest_runtest_logreport(report):
