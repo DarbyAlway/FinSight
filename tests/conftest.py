@@ -2,6 +2,11 @@ import json
 import os
 from datetime import datetime
 
+# Keep test runs out of the production checkpoint store: orchestrator opens
+# its SqliteSaver connection at import time, so the env var must be set
+# before any test imports it.
+os.environ.setdefault("CHECKPOINT_DB", ":memory:")
+
 
 def pytest_runtest_logreport(report):
     if report.when == "call" and report.failed:

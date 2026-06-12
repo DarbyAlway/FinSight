@@ -459,7 +459,8 @@ def build_graph(checkpointer=None):
     return g.compile(checkpointer=checkpointer)
 
 
-_CHECKPOINT_DB = os.path.join(os.path.dirname(__file__), "checkpoints.db")
+_CHECKPOINT_DB = os.environ.get(
+    "CHECKPOINT_DB", os.path.join(os.path.dirname(__file__), "checkpoints.db"))
 _GRAPH = build_graph(
     checkpointer=SqliteSaver(_sqlite3.connect(_CHECKPOINT_DB, check_same_thread=False))
 )
@@ -472,6 +473,22 @@ def process_turn(
     persona_system: str | None = None,
     thread_id: str | None = None,
 ) -> tuple[str, list[dict]]:
+    """Run one conversational turn through the LangGraph pipeline.
+
+    Args:
+        user_input: The user's question or message.
+        messages: Conversation history as a list of role/content dicts.
+        persona_system: Optional system-prompt override for the persona.
+        thread_id: reuse ONLY to resume a crashed turn (checkpoint
+            ``invoke(None, config)`` semantics).  Never reuse a thread_id
+            for a new question: reducer channels (agent_results,
+            agent_tool_blocks, tokens) MERGE across invokes on the same
+            thread, so stale agent data would leak into routing and fidelity
+            checks.
+
+    Returns:
+        A (answer, updated_messages) tuple.
+    """
     t0 = time.time()
     initial_state = {
         "user_input": user_input,
@@ -487,7 +504,9 @@ def process_turn(
         "critique_done": False,
         "tokens": {},
     }
-    config = {"configurable": {"thread_id": thread_id or uuid.uuid4().hex}}
+    tid = thread_id or uuid.uuid4().hex
+    config = {"configurable": {"thread_id": tid}}
+    logging.info("[turn] thread_id=%s", tid)
     final_state = _GRAPH.invoke(initial_state, config)
     answer = final_state.get("answer", "")
     tokens = final_state.get("tokens", {})
