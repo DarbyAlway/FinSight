@@ -1,5 +1,15 @@
 # LangGraph Migration — Phase 1 (Parity Graph) + Phase 2 (Checkpointing) Implementation Plan
 
+> **✅ COMPLETED 2026-06-12** — all 8 tasks done via subagent-driven development, each with
+> spec-compliance + code-quality review. Final suite: **304 passed, 0 failed** (incl. Qdrant
+> vector tests). Key commits: `4f3eb7e` (state), `f0486d3` (routes), `5506823`+`52d3ceb`+`6820ac7`
+> (nodes + parity fixes), `7077614`+`9800d69` (graph cutover + empty-web-fallback parity edge),
+> `38d69f2`+`aeeeb30` (sqlite checkpointing + test-isolation fixes). Langfuse trace nesting
+> verified live (single `process_turn` trace, agent spans nested — no OTEL bridge needed).
+> Review-driven additions beyond the plan: `mismatch_count` state field (unconditional fidelity
+> log/score parity), `_route_after_web_fallback` (empty Tavily result re-enters fidelity chain),
+> `CHECKPOINT_DB` env override (tests use `:memory:`), thread_id logging + reuse-hazard docs.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Rebuild `process_turn` as a LangGraph `StateGraph` with identical behavior (all 260 tests stay green), then add SQLite checkpointing for crash-resume.
