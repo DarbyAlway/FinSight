@@ -2,7 +2,9 @@ import json
 import logging
 import os
 import re
+import sqlite3 as _sqlite3
 import time
+import uuid
 from datetime import date
 
 from langfuse import observe
@@ -31,6 +33,7 @@ from agents.ratios import run as run_ratios
 from prompts import PLAN_SYSTEM, SYNTHESIS_SYSTEM, TIME_SENSITIVE_KEYWORDS
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
+from langgraph.checkpoint.sqlite import SqliteSaver
 from graph_state import TurnState
 from tools.search_guardrails import is_uncertain, _web_search_with_sources, agents_returned_nothing
 from tools.groups import detect_group_in_query
@@ -456,7 +459,10 @@ def build_graph(checkpointer=None):
     return g.compile(checkpointer=checkpointer)
 
 
-_GRAPH = build_graph()
+_CHECKPOINT_DB = os.path.join(os.path.dirname(__file__), "checkpoints.db")
+_GRAPH = build_graph(
+    checkpointer=SqliteSaver(_sqlite3.connect(_CHECKPOINT_DB, check_same_thread=False))
+)
 
 
 @observe(name="process_turn")
@@ -464,6 +470,7 @@ def process_turn(
     user_input: str,
     messages: list[dict],
     persona_system: str | None = None,
+    thread_id: str | None = None,
 ) -> tuple[str, list[dict]]:
     t0 = time.time()
     initial_state = {
@@ -480,7 +487,8 @@ def process_turn(
         "critique_done": False,
         "tokens": {},
     }
-    final_state = _GRAPH.invoke(initial_state)
+    config = {"configurable": {"thread_id": thread_id or uuid.uuid4().hex}}
+    final_state = _GRAPH.invoke(initial_state, config)
     answer = final_state.get("answer", "")
     tokens = final_state.get("tokens", {})
     logging.info("[tokens] plan=%d agents=%d synthesis=%d total=%d",

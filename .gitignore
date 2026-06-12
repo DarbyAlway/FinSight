@@ -1,4 +1,5 @@
 cache.db
+checkpoints.db*
 __pycache__/
 *.pyc
 .pytest_cache/
