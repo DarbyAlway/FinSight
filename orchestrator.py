@@ -428,6 +428,24 @@ def _keyword_fallback(question: str) -> list[str]:
     return ["financials"]
 
 
+# LangGraph node name -> friendly progress stage shown to the user. The graph
+# runs a subset of these per turn; consecutive duplicate stages are collapsed so
+# the UI sees ~4-5 transitions (planning -> fetching -> writing -> verifying).
+_NODE_STAGE = {
+    "plan": "planning",
+    "gates": "planning",
+    "agent": "fetching",
+    "collect": "fetching",
+    "proactive_web": "fetching",
+    "synthesize": "writing",
+    "web_fallback": "verifying",
+    "fidelity_check": "verifying",
+    "self_critique": "verifying",
+    "web_escalate": "verifying",
+    "finalize": "done",
+}
+
+
 def build_graph(checkpointer=None):
     g = StateGraph(TurnState)
     g.add_node("plan", _plan_node)
@@ -467,6 +485,7 @@ def process_turn(
     messages: list[dict],
     persona_system: str | None = None,
     thread_id: str | None = None,
+    on_stage=None,
 ) -> tuple[str, list[dict]]:
     """Run one conversational turn through the LangGraph pipeline.
 
@@ -506,7 +525,28 @@ def process_turn(
     # (crashed mid-graph) nodes; otherwise run fresh. invoke(None) continues
     # from the checkpoint without re-running completed nodes.
     resuming = thread_id is not None and bool(_GRAPH.get_state(config).next)
-    final_state = _GRAPH.invoke(None if resuming else initial_state, config)
+    graph_input = None if resuming else initial_state
+    if on_stage is None:
+        final_state = _GRAPH.invoke(graph_input, config)
+    else:
+        last_stage = None
+        tickers: list = []
+        agents: list = []
+        for update in _GRAPH.stream(graph_input, config, stream_mode="updates"):
+            for node, delta in update.items():
+                if isinstance(delta, dict):
+                    tickers = delta.get("tickers") or tickers
+                    agents = delta.get("agents_to_run") or agents
+                stage = _NODE_STAGE.get(node)
+                if stage and stage != last_stage:
+                    detail = ""
+                    if stage == "fetching" and tickers:
+                        detail = ", ".join(tickers)
+                        if agents:
+                            detail += ": " + ", ".join(agents)
+                    on_stage(stage, detail)
+                    last_stage = stage
+        final_state = _GRAPH.get_state(config).values
     answer = final_state.get("answer", "")
     tokens = final_state.get("tokens", {})
     logging.info("[tokens] plan=%d agents=%d synthesis=%d total=%d",
