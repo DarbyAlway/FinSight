@@ -49,3 +49,60 @@ def test_stream_turn_emits_error_on_exception():
 
     assert events[-1][0] == "error"
     assert "EDGAR timed out" in events[-1][1]["message"]
+
+
+import os
+
+import pytest
+
+TEST_DB = os.environ.get("TEST_DATABASE_URL")
+pg_required = pytest.mark.skipif(not TEST_DB, reason="Set TEST_DATABASE_URL (postgres) for API tests.")
+
+
+@pytest.fixture
+def client(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", TEST_DB)
+    monkeypatch.setenv("WEBAPP_SKIP_WARMUP", "1")
+    import importlib
+
+    import tools.pg as pg
+    importlib.reload(pg)
+    from webapp import db as appdb
+    importlib.reload(appdb)
+    appdb.init_app_schema()
+    with pg.get_pool().connection() as conn:
+        conn.execute("TRUNCATE messages, chats RESTART IDENTITY CASCADE")
+
+    from fastapi.testclient import TestClient
+    from webapp import app as appmod
+    importlib.reload(appmod)
+    with TestClient(appmod.app) as c:
+        yield c
+
+
+@pg_required
+def test_create_list_get_delete_chat(client):
+    r = client.post("/chats", json={"title": "Apple"})
+    assert r.status_code == 200
+    chat_id = r.json()["id"]
+
+    r = client.get("/chats")
+    assert r.status_code == 200
+    assert any(c["id"] == chat_id for c in r.json())
+
+    r = client.get(f"/chats/{chat_id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"] == chat_id
+    assert body["messages"] == []
+
+    r = client.delete(f"/chats/{chat_id}")
+    assert r.status_code == 200
+    r = client.get(f"/chats/{chat_id}")
+    assert r.status_code == 404
+
+
+@pg_required
+def test_get_missing_chat_is_404(client):
+    r = client.get("/chats/00000000-0000-0000-0000-000000000000")
+    assert r.status_code == 404
