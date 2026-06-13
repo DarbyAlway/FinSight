@@ -72,7 +72,11 @@ def delete_chat(chat_id: str):
 def send_message(chat_id: str, body: SendMessage):
     """Start a turn for this chat and stream SSE: `stage`* then `answer`/`error`.
     Saves the user message immediately and the assistant message once produced.
-    (Resume/ask-back is Plan 3; this always starts a fresh turn.)"""
+
+    On a turn error, the stream emits an `error` event and on_answer is never
+    called, so the user message persists with no assistant reply — intentional,
+    so the user can retry without re-typing. (Resume/ask-back is Plan 3; this
+    always starts a fresh turn.)"""
     if db.get_chat(chat_id) is None:
         raise HTTPException(status_code=404, detail="chat not found")
 
