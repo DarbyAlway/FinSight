@@ -8,8 +8,6 @@ qdrant-client[fastembed]
 pandas
 numpy
 openai>=1.0
-arize-phoenix>=4.0
-openinference-instrumentation-openai>=0.1
 langfuse>=2.0
 pydantic>=2.0
 gliner
