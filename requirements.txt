@@ -16,3 +16,6 @@ gliner
 rapidfuzz
 langgraph>=1.0
 langgraph-checkpoint-sqlite>=3.0
+langgraph-checkpoint-postgres>=2.0
+psycopg[binary]>=3.1
+psycopg-pool>=3.2
