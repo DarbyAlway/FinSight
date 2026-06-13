@@ -8,9 +8,11 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from webapp import db
+from webapp.turn_runner import stream_turn
 
 
 @asynccontextmanager
@@ -34,6 +36,10 @@ app = FastAPI(title="FinSight API", lifespan=lifespan)
 
 class CreateChat(BaseModel):
     title: str = "New chat"
+
+
+class SendMessage(BaseModel):
+    content: str
 
 
 @app.get("/chats")
@@ -60,3 +66,23 @@ def delete_chat(chat_id: str):
         raise HTTPException(status_code=404, detail="chat not found")
     db.delete_chat(chat_id)
     return {"ok": True}
+
+
+@app.post("/chats/{chat_id}/messages")
+def send_message(chat_id: str, body: SendMessage):
+    """Start a turn for this chat and stream SSE: `stage`* then `answer`/`error`.
+    Saves the user message immediately and the assistant message once produced.
+    (Resume/ask-back is Plan 3; this always starts a fresh turn.)"""
+    if db.get_chat(chat_id) is None:
+        raise HTTPException(status_code=404, detail="chat not found")
+
+    history = db.get_messages(chat_id)
+    db.add_message(chat_id, role="user", content=body.content)
+
+    def on_answer(answer: str):
+        db.add_message(chat_id, role="assistant", content=answer)
+
+    return StreamingResponse(
+        stream_turn(user_input=body.content, history=history, on_answer=on_answer),
+        media_type="text/event-stream",
+    )

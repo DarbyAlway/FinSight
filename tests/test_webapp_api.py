@@ -106,3 +106,44 @@ def test_create_list_get_delete_chat(client):
 def test_get_missing_chat_is_404(client):
     r = client.get("/chats/00000000-0000-0000-0000-000000000000")
     assert r.status_code == 404
+
+
+import json as _json
+from unittest.mock import patch as _patch
+
+
+@pg_required
+def test_post_message_streams_stages_then_answer_and_persists(client, monkeypatch):
+    r = client.post("/chats", json={"title": "t"})
+    chat_id = r.json()["id"]
+
+    def fake_process_turn(user_input, history, persona_system=None, on_stage=None):
+        on_stage("planning", "")
+        on_stage("fetching", "AAPL: financials")
+        on_stage("writing", "")
+        ans = "Revenue was 391,035M in FY2024."
+        return (ans, history + [
+            {"role": "user", "content": user_input},
+            {"role": "assistant", "content": ans},
+        ])
+
+    with _patch("webapp.turn_runner.process_turn", side_effect=fake_process_turn):
+        with client.stream("POST", f"/chats/{chat_id}/messages",
+                           json={"content": "AAPL revenue?"}) as resp:
+            assert resp.status_code == 200
+            body = "".join(resp.iter_text())
+
+    assert "event: stage" in body
+    assert "event: answer" in body
+    assert "391,035M" in body
+
+    chat = client.get(f"/chats/{chat_id}").json()
+    assert [m["role"] for m in chat["messages"]] == ["user", "assistant"]
+    assert chat["messages"][0]["content"] == "AAPL revenue?"
+
+
+@pg_required
+def test_post_message_to_missing_chat_is_404(client):
+    r = client.post("/chats/00000000-0000-0000-0000-000000000000/messages",
+                    json={"content": "hi"})
+    assert r.status_code == 404
