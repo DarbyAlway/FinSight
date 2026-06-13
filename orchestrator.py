@@ -499,6 +499,12 @@ def process_turn(
             agent_tool_blocks, tokens) MERGE across invokes on the same
             thread, so stale agent data would leak into routing and fidelity
             checks.
+        on_stage: Optional ``callable(stage: str, detail: str)`` invoked once
+            per distinct pipeline stage as graph nodes complete
+            ("planning"/"fetching"/"writing"/"verifying"/"done"; "fetching"
+            carries the tickers/agents as detail). When None (the default),
+            the graph runs via a plain ``invoke`` with no streaming overhead
+            and behavior is unchanged.
 
     Returns:
         A (answer, updated_messages) tuple.
