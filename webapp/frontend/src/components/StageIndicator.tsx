@@ -12,8 +12,11 @@ export default function StageIndicator({ stage }: { stage: StageInfo | null }) {
   if (!stage) return null;
   const label = LABELS[stage.stage] ?? stage.stage;
   return (
-    <div className="flex items-center gap-2 px-4 py-2 text-sm text-gray-500" role="status">
-      <span className="animate-pulse">●</span>
+    <div
+      className="mx-auto flex w-full max-w-3xl items-center gap-2 px-4 py-2 text-sm text-neutral-400"
+      role="status"
+    >
+      <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-400" aria-hidden="true" />
       <span>
         {label}
         {stage.detail ? ` (${stage.detail})` : ''}
