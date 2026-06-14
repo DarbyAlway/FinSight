@@ -18,7 +18,7 @@ export default function Composer({
 
   return (
     <div className="border-t border-white/10 p-3">
-      <div className="mx-auto flex max-w-3xl items-end gap-2">
+      <div className="flex max-w-3xl items-end gap-2">
         <textarea
           className="max-h-40 flex-1 resize-none rounded-xl border border-white/10 bg-neutral-900 px-4 py-2.5 text-sm text-neutral-100 placeholder-neutral-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
           rows={1}
