@@ -44,3 +44,18 @@ body {
 }
 .markdown pre code { background: none; padding: 0; }
 .markdown img { max-width: 100%; height: auto; }
+
+/* Wide tables: scroll horizontally with the first (label) column pinned, plus a
+   right-edge shadow hinting there's more to scroll. */
+.md-table-wrap {
+  overflow-x: auto;
+  box-shadow: inset -14px 0 10px -12px rgba(0, 0, 0, 0.55);
+}
+.md-table-wrap th:first-child,
+.md-table-wrap td:first-child {
+  position: sticky;
+  left: 0;
+  box-shadow: 1px 0 0 #2a2f3a;
+}
+.md-table-wrap td:first-child { background: #262b36; }
+.md-table-wrap th:first-child { background: #2f333e; z-index: 1; }

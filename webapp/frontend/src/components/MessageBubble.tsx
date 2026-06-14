@@ -10,7 +10,7 @@ export default function MessageBubble({ message }: { message: Message }) {
         className={`max-w-[85%] overflow-hidden break-words rounded-2xl px-4 py-2.5 text-sm shadow-sm sm:max-w-2xl ${
           isUser
             ? 'bg-green-600 text-white'
-            : 'border border-white/10 bg-neutral-800/80 text-neutral-100'
+            : 'border border-white/10 bg-[#262b36] text-neutral-100'
         }`}
       >
         {isUser ? (
@@ -24,7 +24,7 @@ export default function MessageBubble({ message }: { message: Message }) {
                 // bubble instead of overflowing past its border.
                 table({ node, ...props }) {
                   return (
-                    <div className="overflow-x-auto">
+                    <div className="md-table-wrap">
                       <table {...props} />
                     </div>
                   );
