@@ -96,7 +96,7 @@ export default function App() {
             <>
               <MessageList messages={messages} />
               {stage && (
-                <div className="mx-auto max-w-5xl px-4 pb-6">
+                <div className="px-4 pb-6">
                   <StageIndicator stage={stage} />
                 </div>
               )}
@@ -110,7 +110,7 @@ export default function App() {
         </div>
 
         {error && (
-          <div className="mx-auto mb-2 w-full max-w-5xl rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-300">
+          <div className="mb-2 w-full rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-300">
             {error}
           </div>
         )}
