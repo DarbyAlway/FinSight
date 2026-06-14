@@ -12,3 +12,5 @@ debug_10q.py
 test/
 .claude/
 .playwright-mcp/
+webapp/frontend/node_modules/
+webapp/frontend/dist/

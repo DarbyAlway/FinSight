@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from webapp import db
@@ -90,3 +91,18 @@ def send_message(chat_id: str, body: SendMessage):
         stream_turn(user_input=body.content, history=history, on_answer=on_answer),
         media_type="text/event-stream",
     )
+
+
+_FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+
+
+def mount_frontend(target_app, dist_dir: str = _FRONTEND_DIST) -> None:
+    """Serve the built React bundle at '/' if it exists. Mounted AFTER the API
+    routes so '/chats*' still hits the API; the catch-all only serves the SPA.
+    A no-op when the build dir is absent (dev / API-only test setups)."""
+    if os.path.isdir(dist_dir):
+        target_app.mount("/", StaticFiles(directory=dist_dir, html=True), name="frontend")
+
+
+# Serve the SPA when a production build is present (skipped in dev/tests).
+mount_frontend(app)
