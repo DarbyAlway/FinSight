@@ -21,7 +21,7 @@ export default function ChatSidebar({
       </div>
       <div className="px-3">
         <button
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-green-500"
           onClick={onNew}
         >
           + New chat
