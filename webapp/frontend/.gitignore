@@ -1,2 +1,4 @@
 node_modules/
 dist/
+# Un-ignore src/test/ which the root .gitignore excludes via "test/"
+!src/test/
