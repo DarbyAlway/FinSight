@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useChatStore } from './store/chatStore';
 import ChatSidebar from './components/ChatSidebar';
 import MessageList from './components/MessageList';
@@ -20,10 +20,16 @@ export default function App() {
 
   // UI-only: whether the off-canvas sidebar drawer is open on mobile.
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadChats();
   }, [loadChats]);
+
+  // Keep the latest message / progress indicator scrolled into view.
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView?.({ behavior: 'smooth' });
+  }, [messages, stage]);
 
   const handleSelect = (id: string) => {
     selectChat(id);
@@ -87,7 +93,15 @@ export default function App() {
 
         <div className="flex-1 overflow-y-auto">
           {currentChatId ? (
-            <MessageList messages={messages} />
+            <>
+              <MessageList messages={messages} />
+              {stage && (
+                <div className="mx-auto max-w-3xl px-4 pb-6">
+                  <StageIndicator stage={stage} />
+                </div>
+              )}
+              <div ref={bottomRef} />
+            </>
           ) : (
             <div className="flex h-full items-center justify-center p-8 text-center text-neutral-500">
               Select or start a chat.
@@ -100,7 +114,6 @@ export default function App() {
             {error}
           </div>
         )}
-        <StageIndicator stage={stage} />
         <Composer disabled={status === 'streaming' || !currentChatId} onSend={send} />
       </main>
     </div>
