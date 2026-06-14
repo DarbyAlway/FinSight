@@ -1,0 +1,6 @@
+@import "tailwindcss";
+
+/* Minimal table styling for rendered markdown (no typography plugin). */
+.markdown table { border-collapse: collapse; margin: 0.5rem 0; }
+.markdown th, .markdown td { border: 1px solid #d1d5db; padding: 0.25rem 0.5rem; text-align: left; }
+.markdown a { color: #2563eb; text-decoration: underline; }
