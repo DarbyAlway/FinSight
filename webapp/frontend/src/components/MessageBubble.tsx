@@ -7,7 +7,7 @@ export default function MessageBubble({ message }: { message: Message }) {
   return (
     <div className={isUser ? 'flex justify-end' : 'flex justify-start'}>
       <div
-        className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm shadow-sm sm:max-w-2xl ${
+        className={`max-w-[85%] overflow-hidden break-words rounded-2xl px-4 py-2.5 text-sm shadow-sm sm:max-w-2xl ${
           isUser
             ? 'bg-green-600 text-white'
             : 'border border-white/10 bg-neutral-800/80 text-neutral-100'
@@ -17,7 +17,22 @@ export default function MessageBubble({ message }: { message: Message }) {
           <span className="whitespace-pre-wrap">{message.content}</span>
         ) : (
           <div className="markdown">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                // Wrap wide tables so they scroll horizontally inside the
+                // bubble instead of overflowing past its border.
+                table({ node, ...props }) {
+                  return (
+                    <div className="overflow-x-auto">
+                      <table {...props} />
+                    </div>
+                  );
+                },
+              }}
+            >
+              {message.content}
+            </ReactMarkdown>
           </div>
         )}
       </div>

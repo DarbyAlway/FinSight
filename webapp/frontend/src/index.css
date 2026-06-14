@@ -15,7 +15,7 @@ body {
 }
 
 /* Markdown rendering (dark). No typography plugin. */
-.markdown { line-height: 1.6; }
+.markdown { line-height: 1.6; overflow-wrap: anywhere; }
 .markdown > :first-child { margin-top: 0; }
 .markdown > :last-child { margin-bottom: 0; }
 .markdown p { margin: 0.5rem 0; }
@@ -35,3 +35,12 @@ body {
   margin: 0.8rem 0 0.4rem;
   line-height: 1.3;
 }
+.markdown pre {
+  overflow-x: auto;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.4rem;
+  margin: 0.5rem 0;
+}
+.markdown pre code { background: none; padding: 0; }
+.markdown img { max-width: 100%; height: auto; }
