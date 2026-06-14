@@ -21,7 +21,7 @@ body {
 .markdown p { margin: 0.5rem 0; }
 .markdown table { border-collapse: collapse; margin: 0.75rem 0; font-size: 0.9rem; }
 .markdown th, .markdown td { border: 1px solid #2a2f3a; padding: 0.4rem 0.7rem; text-align: left; }
-.markdown th { background: rgba(255, 255, 255, 0.04); font-weight: 600; }
+.markdown th { background: rgba(255, 255, 255, 0.04); font-weight: 600; white-space: nowrap; }
 .markdown a { color: #818cf8; text-decoration: underline; }
 .markdown code {
   background: rgba(255, 255, 255, 0.08);
