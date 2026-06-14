@@ -5,12 +5,12 @@ import type { Message } from '../types';
 export default function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === 'user';
   return (
-    <div className={isUser ? 'flex justify-end' : 'flex justify-start'}>
+    <div className={`flex min-w-0 ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`overflow-hidden break-words rounded-2xl px-4 py-2.5 text-sm shadow-sm ${
+        className={`min-w-0 overflow-hidden break-words rounded-2xl px-4 py-2.5 text-sm shadow-sm ${
           isUser
             ? 'max-w-[85%] bg-green-600 text-white sm:max-w-2xl'
-            : 'max-w-full border border-white/10 bg-[#262b36] text-neutral-100'
+            : 'w-full border border-white/10 bg-[#262b36] text-neutral-100'
         }`}
       >
         {isUser ? (

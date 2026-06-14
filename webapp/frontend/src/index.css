@@ -19,9 +19,12 @@ body {
 .markdown > :first-child { margin-top: 0; }
 .markdown > :last-child { margin-bottom: 0; }
 .markdown p { margin: 0.5rem 0; }
-.markdown table { border-collapse: collapse; margin: 0.75rem 0; font-size: 0.9rem; }
-.markdown th, .markdown td { border: 1px solid #2a2f3a; padding: 0.4rem 0.7rem; text-align: left; white-space: nowrap; }
+.markdown table { max-width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.9rem; }
+/* Long-text cells wrap (overflow-wrap:anywhere also breaks space-less Thai);
+   headers and the first (label) column stay on one line. */
+.markdown th, .markdown td { border: 1px solid #2a2f3a; padding: 0.4rem 0.7rem; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .markdown th { background: rgba(255, 255, 255, 0.04); font-weight: 600; white-space: nowrap; }
+.markdown td:first-child { white-space: nowrap; }
 .markdown a { color: #818cf8; text-decoration: underline; }
 .markdown code {
   background: rgba(255, 255, 255, 0.08);
@@ -47,18 +50,14 @@ body {
 
 /* Wide tables: scroll horizontally with the first (label) column pinned, plus a
    right-edge shadow hinting there's more to scroll. */
-.md-table-wrap { overflow-x: auto; }
-
-/* On phones, keep tables compact + scrollable with a pinned label column.
-   On desktop they fit, so render normally (wrap, no scroll/sticky). */
-@media (max-width: 767px) {
-  .md-table-wrap { box-shadow: inset -14px 0 10px -12px rgba(0, 0, 0, 0.55); }
-  .md-table-wrap th:first-child,
-  .md-table-wrap td:first-child {
-    position: sticky;
-    left: 0;
-    box-shadow: 1px 0 0 #2a2f3a;
-  }
-  .md-table-wrap td:first-child { background: #262b36; }
-  .md-table-wrap th:first-child { background: #2f333e; z-index: 1; }
+/* Wide tables scroll horizontally with the first (label) column pinned.
+   Tables that fit the bubble show no scrollbar. */
+.md-table-wrap { overflow-x: auto; max-width: 100%; }
+.md-table-wrap th:first-child,
+.md-table-wrap td:first-child {
+  position: sticky;
+  left: 0;
+  box-shadow: 1px 0 0 #2a2f3a;
 }
+.md-table-wrap td:first-child { background: #262b36; }
+.md-table-wrap th:first-child { background: #2f333e; z-index: 1; }
