@@ -16,7 +16,7 @@ export default function ChatSidebar({
   return (
     <aside className="flex h-full w-full flex-col border-r border-white/10 bg-[#11141b]">
       <div className="flex items-center gap-2 px-4 py-4">
-        <span className="inline-block h-3 w-3 rounded-sm bg-indigo-500" aria-hidden="true" />
+        <span className="inline-block h-3 w-3 rounded-sm bg-green-500" aria-hidden="true" />
         <span className="text-lg font-semibold tracking-tight">FinSight</span>
       </div>
       <div className="px-3">
