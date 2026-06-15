@@ -114,3 +114,59 @@ def test_duplicate_email_rejected(client):
 def test_bad_login_rejected(client):
     client.post("/auth/register", json={"email": "u@x.com", "password": "pw12345"})
     assert client.post("/auth/login", json={"email": "u@x.com", "password": "nope"}).status_code == 401
+
+
+from unittest.mock import patch as _patch
+
+
+def _fake_stream(monkeypatch):
+    """Patch the turn runner to emit one answer and report 1000 tokens via on_usage."""
+    def fake_stream_turn(user_input, history, **kw):
+        if kw.get("on_usage"):
+            kw["on_usage"](1000)
+        if kw.get("on_answer"):
+            kw["on_answer"]("ok")
+        yield "event: answer\ndata: {\"markdown\": \"ok\"}\n\n"
+    return fake_stream_turn
+
+
+def test_per_user_cap_blocks_non_owner(client, monkeypatch):
+    client.post("/auth/register", json={"email": "u@x.com", "password": "pw12345"})
+    chat_id = client.post("/chats", json={"title": "t"}).json()["id"]
+    # Force the user over the cap.
+    from webapp import accounts
+    uid = accounts.get_user_by_email("u@x.com")["user_id"]
+    accounts.add_user_tokens(uid, 200_000)
+    r = client.post(f"/chats/{chat_id}/messages", json={"content": "hi"})
+    assert r.status_code == 429
+
+
+def test_owner_is_exempt(client, monkeypatch):
+    client.post("/auth/register", json={"email": "owner@x.com", "password": "pw12345"})
+    chat_id = client.post("/chats", json={"title": "t"}).json()["id"]
+    from webapp import accounts
+    uid = accounts.get_user_by_email("owner@x.com")["user_id"]
+    accounts.add_user_tokens(uid, 500_000)  # way over, but owner exempt
+    with _patch("webapp.app.stream_turn", side_effect=_fake_stream(monkeypatch)):
+        with client.stream("POST", f"/chats/{chat_id}/messages", json={"content": "hi"}) as resp:
+            assert resp.status_code == 200
+
+
+def test_global_cap_blocks_everyone(client, monkeypatch):
+    monkeypatch.setenv("GLOBAL_TOKEN_CAP", "100")
+    client.post("/auth/register", json={"email": "u@x.com", "password": "pw12345"})
+    chat_id = client.post("/chats", json={"title": "t"}).json()["id"]
+    from webapp import accounts
+    accounts.add_user_tokens(accounts.get_user_by_email("u@x.com")["user_id"], 200)  # over global 100
+    r = client.post(f"/chats/{chat_id}/messages", json={"content": "hi"})
+    assert r.status_code == 503
+
+
+def test_usage_recorded_after_turn(client, monkeypatch):
+    client.post("/auth/register", json={"email": "u@x.com", "password": "pw12345"})
+    chat_id = client.post("/chats", json={"title": "t"}).json()["id"]
+    with _patch("webapp.app.stream_turn", side_effect=_fake_stream(monkeypatch)):
+        with client.stream("POST", f"/chats/{chat_id}/messages", json={"content": "hi"}) as resp:
+            "".join(resp.iter_text())
+    from webapp import accounts
+    assert accounts.get_user_by_email("u@x.com")["tokens_used"] == 1000
