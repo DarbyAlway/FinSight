@@ -24,6 +24,14 @@ export async function sendMessage(
       body: JSON.stringify({ content }),
       signal: ctrl.signal,
       openWhenHidden: true,
+      async onopen(response) {
+        if (!response.ok) {
+          let msg = 'Request failed.';
+          try { msg = (await response.json()).detail ?? msg; } catch { /* ignore */ }
+          h.onError(msg);
+          throw new Error(msg); // stop the stream
+        }
+      },
       onmessage(ev) {
         if (!ev.event || ev.event === 'message') return;
         const data = ev.data ? JSON.parse(ev.data) : {};

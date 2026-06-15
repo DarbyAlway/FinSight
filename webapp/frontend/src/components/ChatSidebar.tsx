@@ -6,12 +6,16 @@ export default function ChatSidebar({
   onSelect,
   onNew,
   onDelete,
+  user,
+  onLogout,
 }: {
   chats: Chat[];
   currentChatId: string | null;
   onSelect: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
+  user?: { email: string };
+  onLogout?: () => void;
 }) {
   return (
     <aside className="flex h-full w-full flex-col border-r border-white/10 bg-[#11141b]">
@@ -51,6 +55,12 @@ export default function ChatSidebar({
           );
         })}
       </ul>
+      {user && (
+        <div className="border-t border-white/10 p-3 text-xs text-neutral-400">
+          <div className="truncate">{user.email}</div>
+          <button className="mt-1 text-neutral-400 hover:text-red-400" onClick={onLogout}>Log out</button>
+        </div>
+      )}
     </aside>
   );
 }

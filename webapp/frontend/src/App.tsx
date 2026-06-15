@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useChatStore } from './store/chatStore';
+import { useAuthStore } from './store/authStore';
 import ChatSidebar from './components/ChatSidebar';
+import AuthScreen from './components/AuthScreen';
 import MessageList from './components/MessageList';
 import StageIndicator from './components/StageIndicator';
 import Composer from './components/Composer';
@@ -18,13 +20,25 @@ export default function App() {
   const deleteChat = useChatStore((s) => s.deleteChat);
   const send = useChatStore((s) => s.send);
 
+  const authStatus = useAuthStore((s) => s.status);
+  const authUser = useAuthStore((s) => s.user);
+  const loadMe = useAuthStore((s) => s.loadMe);
+  const login = useAuthStore((s) => s.login);
+  const register = useAuthStore((s) => s.register);
+  const logout = useAuthStore((s) => s.logout);
+
   // UI-only: whether the off-canvas sidebar drawer is open on mobile.
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    loadChats();
-  }, [loadChats]);
+    loadMe();
+  }, [loadMe]);
+
+  // Only load the user's chats once they're authenticated.
+  useEffect(() => {
+    if (authStatus === 'authed') loadChats();
+  }, [authStatus, loadChats]);
 
   // Keep the latest message / progress indicator scrolled into view.
   useEffect(() => {
@@ -39,6 +53,10 @@ export default function App() {
     newChat();
     setSidebarOpen(false);
   };
+
+  if (authStatus === 'loading')
+    return <div className="flex h-screen items-center justify-center bg-[#0b0d12] text-neutral-500">Loading…</div>;
+  if (authStatus === 'anon') return <AuthScreen onLogin={login} onRegister={register} />;
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#0b0d12] text-neutral-100">
@@ -63,6 +81,8 @@ export default function App() {
           onSelect={handleSelect}
           onNew={handleNew}
           onDelete={deleteChat}
+          user={authUser ?? undefined}
+          onLogout={logout}
         />
       </div>
 

@@ -11,13 +11,24 @@ vi.mock('../api/client', () => ({
   deleteChat: vi.fn(async () => {}),
 }));
 vi.mock('../api/stream', () => ({ sendMessage: vi.fn() }));
+// App gates on auth: mock the auth API so loadMe() resolves to a logged-in user.
+const _u = { id: 'u1', email: 'u@x.com', is_owner: false, tokens_used: 0 };
+vi.mock('../api/auth', () => ({
+  getMe: vi.fn(async () => _u),
+  login: vi.fn(async () => _u),
+  register: vi.fn(async () => _u),
+  logout: vi.fn(async () => {}),
+}));
 
 import App from '../App';
+import { useAuthStore } from '../store/authStore';
 
 // jsdom does not evaluate Tailwind `md:` media queries, so this asserts the
 // drawer toggle STATE (conditional rendering of the backdrop), not the CSS.
 test('hamburger opens the sidebar drawer; backdrop closes it', async () => {
   const user = userEvent.setup();
+  // Start already authenticated so the chat UI (not the loading/login screen) renders.
+  useAuthStore.setState({ user: _u, status: 'authed' });
   render(<App />);
 
   // Closed initially → no backdrop.
