@@ -24,6 +24,7 @@ def stream_turn(
     history: list[dict],
     persona_system: str | None = None,
     on_answer=None,
+    on_usage=None,
 ) -> Iterator[str]:
     """Yield SSE frames for one turn: zero or more `stage` events, then exactly
     one terminal `answer` or `error`. If on_answer is given it is called with the
@@ -36,7 +37,8 @@ def stream_turn(
                 events.put(("stage", {"stage": stage, "detail": detail}))
 
             answer, _ = process_turn(
-                user_input, history, persona_system=persona_system, on_stage=on_stage
+                user_input, history, persona_system=persona_system,
+                on_stage=on_stage, on_usage=on_usage,
             )
             if on_answer is not None:
                 on_answer(answer)

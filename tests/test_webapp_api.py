@@ -18,7 +18,7 @@ def _collect(gen):
 def test_stream_turn_emits_stages_then_answer():
     from webapp.turn_runner import stream_turn
 
-    def fake_process_turn(user_input, history, persona_system=None, on_stage=None):
+    def fake_process_turn(user_input, history, persona_system=None, on_stage=None, on_usage=None):
         on_stage("planning", "")
         on_stage("fetching", "AAPL: financials")
         on_stage("writing", "")
@@ -123,7 +123,7 @@ def test_post_message_streams_stages_then_answer_and_persists(client, monkeypatc
     r = client.post("/chats", json={"title": "t"})
     chat_id = r.json()["id"]
 
-    def fake_process_turn(user_input, history, persona_system=None, on_stage=None):
+    def fake_process_turn(user_input, history, persona_system=None, on_stage=None, on_usage=None):
         on_stage("planning", "")
         on_stage("fetching", "AAPL: financials")
         on_stage("writing", "")

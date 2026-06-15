@@ -486,6 +486,7 @@ def process_turn(
     persona_system: str | None = None,
     thread_id: str | None = None,
     on_stage=None,
+    on_usage=None,
 ) -> tuple[str, list[dict]]:
     """Run one conversational turn through the LangGraph pipeline.
 
@@ -505,6 +506,9 @@ def process_turn(
             carries the tickers/agents as detail). When None (the default),
             the graph runs via a plain ``invoke`` with no streaming overhead
             and behavior is unchanged.
+        on_usage: Optional ``callable(total_tokens: int)`` invoked once on a
+            completed turn with the summed token count (plan + agents +
+            synthesis). Used by the web app to meter per-user usage.
 
     Returns:
         A (answer, updated_messages) tuple.
@@ -559,6 +563,8 @@ def process_turn(
                  tokens.get("plan", 0), tokens.get("agents", 0),
                  tokens.get("synthesis", 0), sum(tokens.values()))
     logging.info("[timing] total turn: %.2fs", time.time() - t0)
+    if on_usage is not None:
+        on_usage(sum(tokens.values()))
     updated_messages = messages + [
         {"role": "user", "content": user_input},
         {"role": "assistant", "content": answer},
