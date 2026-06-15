@@ -54,3 +54,11 @@ def test_record_usage_row(accounts):
     with __import__("tools.pg", fromlist=["pg"]).get_pool().connection() as conn:
         n = conn.execute("SELECT count(*) FROM usage_ledger WHERE user_id=%s", (uid,)).fetchone()[0]
     assert n == 1
+
+
+def test_password_hash_roundtrip():
+    from webapp import auth
+    h = auth.hash_password("s3cret")
+    assert h != "s3cret"
+    assert auth.verify_password("s3cret", h) is True
+    assert auth.verify_password("wrong", h) is False
