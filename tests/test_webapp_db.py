@@ -14,6 +14,10 @@ pytestmark = pytest.mark.skipif(
     reason="Set TEST_DATABASE_URL (postgres) to run webapp DB tests.",
 )
 
+# Chats are scoped per user (user_id is a plain UUID column, no FK), so these
+# DAO tests use one fixed owner id.
+USER = "11111111-1111-1111-1111-111111111111"
+
 
 @pytest.fixture
 def db(monkeypatch):
@@ -34,25 +38,25 @@ def db(monkeypatch):
 
 
 def test_create_and_get_chat(db):
-    chat_id = db.create_chat(title="Apple deep-dive")
+    chat_id = db.create_chat(USER, title="Apple deep-dive")
     assert isinstance(chat_id, str) and chat_id
-    chat = db.get_chat(chat_id)
+    chat = db.get_chat(chat_id, USER)
     assert chat["id"] == chat_id
     assert chat["title"] == "Apple deep-dive"
     assert chat["messages"] == []
 
 
 def test_list_chats_newest_first(db):
-    a = db.create_chat(title="first")
-    b = db.create_chat(title="second")
-    rows = db.list_chats()
+    a = db.create_chat(USER, title="first")
+    b = db.create_chat(USER, title="second")
+    rows = db.list_chats(USER)
     ids = [r["id"] for r in rows]
     assert ids.index(b) < ids.index(a)  # most-recently-updated first
     assert {"id", "title", "updated_at"} <= set(rows[0].keys())
 
 
 def test_add_and_get_messages_in_order(db):
-    chat_id = db.create_chat(title="t")
+    chat_id = db.create_chat(USER, title="t")
     db.add_message(chat_id, role="user", content="AAPL revenue?")
     db.add_message(chat_id, role="assistant", content="It was 391,035M in FY2024.")
     msgs = db.get_messages(chat_id)
@@ -61,20 +65,20 @@ def test_add_and_get_messages_in_order(db):
 
 
 def test_get_chat_includes_messages(db):
-    chat_id = db.create_chat(title="t")
+    chat_id = db.create_chat(USER, title="t")
     db.add_message(chat_id, role="user", content="hi")
-    chat = db.get_chat(chat_id)
+    chat = db.get_chat(chat_id, USER)
     assert len(chat["messages"]) == 1
     assert chat["messages"][0]["content"] == "hi"
 
 
 def test_delete_chat_removes_it_and_messages(db):
-    chat_id = db.create_chat(title="t")
+    chat_id = db.create_chat(USER, title="t")
     db.add_message(chat_id, role="user", content="hi")
-    db.delete_chat(chat_id)
-    assert db.get_chat(chat_id) is None
+    db.delete_chat(chat_id, USER)
+    assert db.get_chat(chat_id, USER) is None
     assert db.get_messages(chat_id) == []
 
 
 def test_get_missing_chat_returns_none(db):
-    assert db.get_chat("00000000-0000-0000-0000-000000000000") is None
+    assert db.get_chat("00000000-0000-0000-0000-000000000000", USER) is None
