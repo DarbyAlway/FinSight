@@ -7,18 +7,19 @@ turn through the orchestrator. No auth in this plan (Plan 4); no ask-back/resume
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from webapp import db
+from webapp import accounts, auth, db
 from webapp.turn_runner import stream_turn
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_app_schema()
+    accounts.init_accounts_schema()
     # Heavy orchestrator warmup (Qdrant, anchor vectors, SEC identity) is only
     # needed for real turns; skip it under tests (which mock the turn) via
     # WEBAPP_SKIP_WARMUP=1 so the API suite needs no Qdrant container.
@@ -41,6 +42,52 @@ class CreateChat(BaseModel):
 
 class SendMessage(BaseModel):
     content: str
+
+
+class Credentials(BaseModel):
+    email: str
+    password: str
+
+
+def _public_user(u: dict) -> dict:
+    return {"id": u["user_id"], "email": u["email"], "is_owner": u["is_owner"],
+            "tokens_used": u["tokens_used"]}
+
+
+@app.post("/auth/register")
+def register(body: Credentials, response: Response):
+    if accounts.get_user_by_email(body.email) is not None:
+        raise HTTPException(status_code=409, detail="email already registered")
+    is_owner = body.email.lower() == os.environ.get("OWNER_EMAIL", "").lower() and bool(
+        os.environ.get("OWNER_EMAIL"))
+    uid = accounts.create_user(body.email, auth.hash_password(body.password), is_owner=is_owner)
+    token = accounts.create_session(uid, ttl_days=auth.SESSION_TTL_DAYS)
+    auth.set_session_cookie(response, token)
+    return _public_user(accounts.get_user_by_id(uid))
+
+
+@app.post("/auth/login")
+def login(body: Credentials, response: Response):
+    user = accounts.get_user_by_email(body.email)
+    if user is None or not auth.verify_password(body.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="invalid email or password")
+    token = accounts.create_session(user["user_id"], ttl_days=auth.SESSION_TTL_DAYS)
+    auth.set_session_cookie(response, token)
+    return _public_user(user)
+
+
+@app.post("/auth/logout")
+def logout(request: Request, response: Response):
+    tok = request.cookies.get(auth.COOKIE_NAME)
+    if tok:
+        accounts.delete_session(tok)
+    auth.clear_session_cookie(response)
+    return {"ok": True}
+
+
+@app.get("/auth/me")
+def me(user: dict = Depends(auth.current_user)):
+    return _public_user(user)
 
 
 @app.get("/chats")

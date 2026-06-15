@@ -62,3 +62,55 @@ def test_password_hash_roundtrip():
     assert h != "s3cret"
     assert auth.verify_password("s3cret", h) is True
     assert auth.verify_password("wrong", h) is False
+
+
+@pytest.fixture
+def client(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", TEST_DB)
+    monkeypatch.setenv("WEBAPP_SKIP_WARMUP", "1")
+    monkeypatch.setenv("OWNER_EMAIL", "owner@x.com")
+    import tools.pg as pg
+    importlib.reload(pg)
+    from webapp import db as appdb; importlib.reload(appdb)
+    from webapp import accounts as acc; importlib.reload(acc)
+    from webapp import auth as a; importlib.reload(a)
+    appdb.init_app_schema(); acc.init_accounts_schema()
+    with pg.get_pool().connection() as conn:
+        conn.execute("TRUNCATE usage_ledger, sessions, messages, chats, users RESTART IDENTITY CASCADE")
+    from fastapi.testclient import TestClient
+    from webapp import app as appmod; importlib.reload(appmod)
+    with TestClient(appmod.app) as c:
+        yield c
+
+
+def test_register_login_me_logout(client):
+    r = client.post("/auth/register", json={"email": "u@x.com", "password": "pw12345"})
+    assert r.status_code == 200
+    assert r.json()["email"] == "u@x.com"
+    assert r.json()["is_owner"] is False
+
+    r = client.get("/auth/me")
+    assert r.status_code == 200 and r.json()["email"] == "u@x.com"
+
+    client.post("/auth/logout")
+    assert client.get("/auth/me").status_code == 401
+
+    r = client.post("/auth/login", json={"email": "u@x.com", "password": "pw12345"})
+    assert r.status_code == 200
+    assert client.get("/auth/me").status_code == 200
+
+
+def test_owner_flag_from_env(client):
+    r = client.post("/auth/register", json={"email": "owner@x.com", "password": "pw12345"})
+    assert r.json()["is_owner"] is True
+
+
+def test_duplicate_email_rejected(client):
+    client.post("/auth/register", json={"email": "u@x.com", "password": "pw12345"})
+    r = client.post("/auth/register", json={"email": "u@x.com", "password": "other123"})
+    assert r.status_code == 409
+
+
+def test_bad_login_rejected(client):
+    client.post("/auth/register", json={"email": "u@x.com", "password": "pw12345"})
+    assert client.post("/auth/login", json={"email": "u@x.com", "password": "nope"}).status_code == 401
