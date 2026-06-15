@@ -17,6 +17,6 @@ SYNONYMS = {
 }
 
 MODEL = "gpt-oss-120b"
-MODEL_AGENT = "gpt-oss-120b"                      # agents — $0.22/$0.59 per M, tool calling confirmed
+MODEL_AGENT = "gemma-4-31B-it"                    # agents — non-reasoning, ~1.4s/round vs gpt-oss's variable 8-57s (reasoning); cheap ($0.38/$1.15) + reliable parallel tool calls on SambaNova (Llama-3.3 400s on them)
 MODEL_PLAN = "Meta-Llama-3.3-70B-Instruct"       # planner — reliable JSON
-MODEL_SYNTHESIS = "gpt-oss-120b"  # synthesis — switched from Llama-3.3-70B 2026-06-10; both pass the FY2022 probe with the year-coverage prompt rule, gpt-oss is cheaper
+MODEL_SYNTHESIS = "Meta-Llama-3.3-70B-Instruct"  # synthesis — non-reasoning, ~1-2s vs gpt-oss's 27-44s (reasoning); no tools so no 400 risk; passed the FY2022 fidelity probe historically (was synthesis model pre-2026-06-10)
