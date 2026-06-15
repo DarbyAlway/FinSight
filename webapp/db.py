@@ -48,29 +48,29 @@ def init_app_schema() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS messages_chat_id_idx ON messages(chat_id, message_id)"
         )
+        conn.execute("ALTER TABLE chats ADD COLUMN IF NOT EXISTS user_id UUID")
+        conn.execute("CREATE INDEX IF NOT EXISTS chats_user_id_idx ON chats(user_id)")
 
 
-def create_chat(title: str = "New chat") -> str:
+def create_chat(user_id: str, title: str = "New chat") -> str:
     pool = _require_pool()
     chat_id = str(uuid.uuid4())
     with pool.connection() as conn:
-        conn.execute(
-            "INSERT INTO chats (chat_id, title) VALUES (%s, %s)", (chat_id, title)
-        )
+        conn.execute("INSERT INTO chats (chat_id, user_id, title) VALUES (%s, %s, %s)",
+                     (chat_id, user_id, title))
     return chat_id
 
 
-def list_chats() -> list[dict]:
-    """All chats, most-recently-updated first (for the sidebar)."""
+def list_chats(user_id: str) -> list[dict]:
+    """The user's chats, most-recently-updated first (for the sidebar)."""
     pool = _require_pool()
     with pool.connection() as conn:
         rows = conn.cursor(row_factory=dict_row).execute(
-            "SELECT chat_id, title, updated_at FROM chats ORDER BY updated_at DESC",
+            "SELECT chat_id, title, updated_at FROM chats WHERE user_id = %s ORDER BY updated_at DESC",
+            (user_id,),
         ).fetchall()
-    return [
-        {"id": str(r["chat_id"]), "title": r["title"], "updated_at": r["updated_at"].isoformat()}
-        for r in rows
-    ]
+    return [{"id": str(r["chat_id"]), "title": r["title"], "updated_at": r["updated_at"].isoformat()}
+            for r in rows]
 
 
 def get_messages(chat_id: str) -> list[dict]:
@@ -87,13 +87,13 @@ def get_messages(chat_id: str) -> list[dict]:
     ]
 
 
-def get_chat(chat_id: str) -> dict | None:
-    """A chat with its messages, or None if it doesn't exist."""
+def get_chat(chat_id: str, user_id: str) -> dict | None:
+    """A chat (owned by user_id) with its messages, or None if absent/not theirs."""
     pool = _require_pool()
     with pool.connection() as conn:
         row = conn.cursor(row_factory=dict_row).execute(
-            "SELECT chat_id, title, created_at, updated_at FROM chats WHERE chat_id = %s",
-            (chat_id,),
+            "SELECT chat_id, title, created_at, updated_at FROM chats WHERE chat_id = %s AND user_id = %s",
+            (chat_id, user_id),
         ).fetchone()
     if row is None:
         return None
@@ -117,7 +117,7 @@ def add_message(chat_id: str, role: str, content: str) -> None:
         conn.execute("UPDATE chats SET updated_at = now() WHERE chat_id = %s", (chat_id,))
 
 
-def delete_chat(chat_id: str) -> None:
+def delete_chat(chat_id: str, user_id: str) -> None:
     pool = _require_pool()
     with pool.connection() as conn:
-        conn.execute("DELETE FROM chats WHERE chat_id = %s", (chat_id,))
+        conn.execute("DELETE FROM chats WHERE chat_id = %s AND user_id = %s", (chat_id, user_id))

@@ -69,14 +69,20 @@ def client(monkeypatch):
     importlib.reload(pg)
     from webapp import db as appdb
     importlib.reload(appdb)
+    from webapp import accounts as acc
+    importlib.reload(acc)
+    from webapp import auth as a
+    importlib.reload(a)
     appdb.init_app_schema()
+    acc.init_accounts_schema()
     with pg.get_pool().connection() as conn:
-        conn.execute("TRUNCATE messages, chats RESTART IDENTITY CASCADE")
+        conn.execute("TRUNCATE usage_ledger, sessions, messages, chats, users RESTART IDENTITY CASCADE")
 
     from fastapi.testclient import TestClient
     from webapp import app as appmod
     importlib.reload(appmod)
     with TestClient(appmod.app) as c:
+        c.post("/auth/register", json={"email": "t@x.com", "password": "pw12345"})
         yield c
 
 

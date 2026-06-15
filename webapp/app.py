@@ -91,41 +91,42 @@ def me(user: dict = Depends(auth.current_user)):
 
 
 @app.get("/chats")
-def list_chats():
-    return db.list_chats()
+def list_chats(user: dict = Depends(auth.current_user)):
+    return db.list_chats(user["user_id"])
 
 
 @app.post("/chats")
-def create_chat(body: CreateChat):
-    return {"id": db.create_chat(title=body.title)}
+def create_chat(body: CreateChat, user: dict = Depends(auth.current_user)):
+    return {"id": db.create_chat(user["user_id"], title=body.title)}
 
 
 @app.get("/chats/{chat_id}")
-def get_chat(chat_id: str):
-    chat = db.get_chat(chat_id)
+def get_chat(chat_id: str, user: dict = Depends(auth.current_user)):
+    chat = db.get_chat(chat_id, user["user_id"])
     if chat is None:
         raise HTTPException(status_code=404, detail="chat not found")
     return chat
 
 
 @app.delete("/chats/{chat_id}")
-def delete_chat(chat_id: str):
-    if db.get_chat(chat_id) is None:
+def delete_chat(chat_id: str, user: dict = Depends(auth.current_user)):
+    if db.get_chat(chat_id, user["user_id"]) is None:
         raise HTTPException(status_code=404, detail="chat not found")
-    db.delete_chat(chat_id)
+    db.delete_chat(chat_id, user["user_id"])
     return {"ok": True}
 
 
 @app.post("/chats/{chat_id}/messages")
-def send_message(chat_id: str, body: SendMessage):
+def send_message(chat_id: str, body: SendMessage, user: dict = Depends(auth.current_user)):
     """Start a turn for this chat and stream SSE: `stage`* then `answer`/`error`.
     Saves the user message immediately and the assistant message once produced.
 
     On a turn error, the stream emits an `error` event and on_answer is never
     called, so the user message persists with no assistant reply — intentional,
     so the user can retry without re-typing. (Resume/ask-back is Plan 3; this
-    always starts a fresh turn.)"""
-    if db.get_chat(chat_id) is None:
+    always starts a fresh turn.) Quota enforcement + usage recording is added in
+    Task 6."""
+    if db.get_chat(chat_id, user["user_id"]) is None:
         raise HTTPException(status_code=404, detail="chat not found")
 
     history = db.get_messages(chat_id)
