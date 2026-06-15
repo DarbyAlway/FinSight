@@ -17,6 +17,15 @@ export interface ChatDetail extends Chat {
   messages: Message[];
 }
 
+export interface User {
+  id: string;
+  email: string;
+  is_owner: boolean;
+  tokens_used: number;
+}
+
+export type AuthStatus = 'loading' | 'authed' | 'anon';
+
 export type StreamStatus = 'idle' | 'streaming' | 'error';
 
 export interface StageInfo {
