@@ -1,8 +1,10 @@
 """Shared tool-execution helpers: a single Langfuse-traced tool call, and the
 guarded agent tool-calling loop used by all four agents."""
+import contextvars
 import json
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from langfuse import get_client
 
@@ -126,22 +128,48 @@ def run_tool_loop(
             ],
         })
 
+        # Parse this round's tool calls up front.
+        parsed = []
         for tool_call in msg.tool_calls:
             name = tool_call.function.name
             try:
                 args = json.loads(tool_call.function.arguments)
             except (json.JSONDecodeError, TypeError):
                 args = {}
-            key = (name, json.dumps(args, sort_keys=True))
-            if key in seen:
+            parsed.append((tool_call, name, args, (name, json.dumps(args, sort_keys=True))))
+
+        # Tool calls are network I/O (SEC / yfinance / news), so a round with N
+        # calls (e.g. one get_* per ticker) that would take sum(latencies)
+        # serially finishes in ~max(latency) when run concurrently. Execute the
+        # uncached, unique calls in a thread pool; each runs in a copied context
+        # so its Langfuse "tool" span still nests under the agent span. Duplicate
+        # / already-cached calls are served from cache, never re-run.
+        pre_round_keys = set(seen)
+        to_run = {}
+        for _tc, name, args, key in parsed:
+            if key not in seen and key not in to_run:
+                to_run[key] = (name, args)
+        if len(to_run) == 1:  # common single-tool round — skip thread overhead
+            (key, (name, args)), = to_run.items()
+            seen[key] = execute_tool(agent_tag, name, args, tool_functions.get(name))
+        elif to_run:
+            def _run(key, name, args):
+                ctx = contextvars.copy_context()
+                return key, ctx.run(execute_tool, agent_tag, name, args, tool_functions.get(name))
+            with ThreadPoolExecutor(max_workers=min(len(to_run), 8)) as pool:
+                for fut in [pool.submit(_run, k, n, a) for k, (n, a) in to_run.items()]:
+                    k, res = fut.result()
+                    seen[k] = res
+
+        # Emit one tool message per call, in the model's original order.
+        emitted = set()
+        for tool_call, name, args, key in parsed:
+            result = seen[key]
+            if key in pre_round_keys or key in emitted:
                 logging.warning("[%s] guardrail: duplicate call %s(%s) — serving cached result", agent_tag, name, args)
-                cached = seen[key]
-                result = (cached + "\n[NOTE: this exact call was already made — use the result above; do not repeat it.]"
-                          if isinstance(cached, str) else cached)
-            else:
-                fn = tool_functions.get(name)
-                result = execute_tool(agent_tag, name, args, fn)
-                seen[key] = result
+                if isinstance(result, str):
+                    result = result + "\n[NOTE: this exact call was already made — use the result above; do not repeat it.]"
+            emitted.add(key)
             result_log.append(_is_error_result(result))
             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
 

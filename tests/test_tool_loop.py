@@ -69,6 +69,34 @@ def test_duplicate_call_is_served_from_cache():
     assert calls["n"] == 1  # second identical call never re-executed
 
 
+def test_tool_calls_in_one_round_run_concurrently():
+    """Multiple tool calls in a single round are I/O-bound (network fetches) and
+    must run concurrently, not serially. Three 0.3s calls should finish in ~0.3s
+    (concurrent), well under the 0.9s a sequential loop would take."""
+    import time as _t
+
+    def slow(ticker):
+        _t.sleep(0.3)
+        return f"data {ticker}"
+
+    tools = [{"type": "function", "function": {"name": "get_x"}}]
+    responses = [
+        _resp(content=None, tool_calls=[
+            _tool_call("get_x", {"ticker": "A"}, "c1"),
+            _tool_call("get_x", {"ticker": "B"}, "c2"),
+            _tool_call("get_x", {"ticker": "C"}, "c3"),
+        ]),
+        _resp(content="done"),
+    ]
+    client = _client_with(responses)
+    t0 = _t.perf_counter()
+    out, _, blocks = run_tool_loop("T", client, "m", [], tools, {"get_x": slow}, temperature=0.0)
+    dt = _t.perf_counter() - t0
+    assert out == "done"
+    assert dt < 0.7, f"tool calls ran serially ({dt:.2f}s); expected concurrent (~0.3s)"
+    assert len(blocks) == 3  # all three results captured
+
+
 def test_max_iterations_cap_stops_runaway_loop():
     # Model never stops requesting a tool — cap must brake it.
     def make(**_):
