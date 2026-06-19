@@ -16,6 +16,11 @@ from webapp import accounts, auth, db
 from webapp.turn_runner import stream_turn
 
 
+def _edgar_identity() -> str:
+    """SEC/EDGAR requires a real contact string in prod; placeholder for local dev."""
+    return os.environ.get("EDGAR_IDENTITY", "yourname@email.com")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_app_schema()
@@ -27,7 +32,7 @@ async def lifespan(app: FastAPI):
         from edgar import set_identity
         from tools.vector import init_qdrant
         from tools.search_guardrails import _get_anchor_vecs
-        set_identity("yourname@email.com")
+        set_identity(_edgar_identity())
         init_qdrant()
         _get_anchor_vecs()
     yield
