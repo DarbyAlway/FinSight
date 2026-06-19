@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import os
 import time
 
 from qdrant_client import QdrantClient, models as qmodels
@@ -29,7 +30,9 @@ def _get_encoders():
 
 
 def init_qdrant() -> QdrantClient:
-    client = QdrantClient("localhost", port=6333)
+    host = os.getenv("QDRANT_HOST", "localhost")
+    port = int(os.getenv("QDRANT_PORT", "6333"))
+    client = QdrantClient(host, port=port)
     existing = [c.name for c in client.get_collections().collections]
     if QDRANT_COLLECTION not in existing:
         client.create_collection(
