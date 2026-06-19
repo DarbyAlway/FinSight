@@ -28,7 +28,7 @@ usermod -aG docker deploy
 su - deploy
 git clone <REPO_URL> ~/NYSE-analysis
 cd ~/NYSE-analysis
-git checkout feature/web-ui-chat   # the deploy branch
+git checkout master   # the deploy branch
 ```
 
 ## 5. Create the server `.env`
