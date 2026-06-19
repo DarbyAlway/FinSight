@@ -1,4 +1,6 @@
-DB_PATH = "cache.db"
+import os
+
+DB_PATH = os.getenv("CACHE_DB_PATH", "cache.db")
 CACHE_TTL_DAYS = 90
 QDRANT_COLLECTION = "stock_news"
 DENSE_MODEL = "intfloat/multilingual-e5-large"
