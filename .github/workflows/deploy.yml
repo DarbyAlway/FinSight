@@ -1,0 +1,28 @@
+name: deploy
+
+on:
+  push:
+    branches: [feature/web-ui-chat]   # change to your deploy branch (e.g. main) when ready
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd ~/NYSE-analysis
+            git fetch --all
+            git reset --hard origin/${GITHUB_REF_NAME}
+            docker compose -f docker-compose.prod.yml up -d --build
+            docker image prune -f
