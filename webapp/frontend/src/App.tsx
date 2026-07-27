@@ -55,11 +55,11 @@ export default function App() {
   };
 
   if (authStatus === 'loading')
-    return <div className="flex h-screen items-center justify-center bg-[#0b0d12] text-neutral-500">Loading…</div>;
+    return <div className="flex h-full items-center justify-center bg-[#0b0d12] text-neutral-500">Loading…</div>;
   if (authStatus === 'anon') return <AuthScreen onLogin={login} onRegister={register} />;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#0b0d12] text-neutral-100">
+    <div className="flex h-full overflow-hidden bg-[#0b0d12] text-neutral-100">
       {/* Mobile backdrop (only rendered while the drawer is open) */}
       {sidebarOpen && (
         <button

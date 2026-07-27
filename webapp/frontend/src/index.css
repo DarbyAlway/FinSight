@@ -1,8 +1,11 @@
 @import "tailwindcss";
 
-:root { color-scheme: dark; }
+:root { color-scheme: dark; --app-height: 100vh; }
+/* `dvh` follows the dynamic viewport; JS overrides --app-height with the live
+   visual-viewport height so the layout tracks the mobile keyboard. */
+@supports (height: 100dvh) { :root { --app-height: 100dvh; } }
 
-html, body, #root { height: 100%; }
+html, body, #root { height: var(--app-height); }
 
 body {
   margin: 0;

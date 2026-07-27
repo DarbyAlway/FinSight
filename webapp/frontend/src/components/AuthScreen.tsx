@@ -27,7 +27,7 @@ export default function AuthScreen({
   };
 
   return (
-    <div className="flex h-screen items-center justify-center bg-[#0b0d12] text-neutral-100">
+    <div className="flex h-full items-center justify-center bg-[#0b0d12] text-neutral-100">
       <form onSubmit={submit} className="w-80 rounded-2xl border border-white/10 bg-[#11141b] p-6">
         <div className="mb-4 flex items-center gap-2">
           <span className="inline-block h-3 w-3 rounded-sm bg-green-500" />
