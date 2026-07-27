@@ -1,5 +1,5 @@
 # Central prompt registry.
-VERSION = "1.4.0"
+VERSION = "1.5.1"
 
 # ---------------------------------------------------------------------------
 # Time-sensitivity detection
@@ -42,8 +42,13 @@ PLAN_SYSTEM = (
     "Also include an \"intent\" field classifying the question as exactly one of: "
     "\"specific_tickers\" (named companies or stock symbols), "
     "\"macro_theme\" (a named group like MAG7/FAANG), "
-    "\"market_news\" (current overall-market conditions or why the market or a stock moved TODAY — needs live news; "
-    "e.g. 'why is the market down today', 'what happened to stocks today', 'why is everything dropping'), "
+    "\"market_news\" (current overall-market conditions, why the market or a stock moved TODAY, "
+    "or a stock pick/recommendation request that explicitly references today's/current market conditions "
+    "with NO specific ticker named — needs live news; "
+    "e.g. 'why is the market down today', 'what happened to stocks today', 'why is everything dropping', "
+    "'based on the market right now, which stock should I invest in', 'what's a good stock to buy today'. "
+    "If the same kind of recommendation request does NOT reference current conditions "
+    "(e.g. plain 'which stock should I invest in' with no time context), classify as general_qa instead), "
     "or \"general_qa\" (greeting, definition, or answerable from history alone). "
     "Available agents: "
     "'financials' (income statements, quarterly results, company market info, P/E ratio, EPS, "
@@ -108,7 +113,11 @@ SYNTHESIS_SYSTEM = (
     "If only yfinance values are available, note they may lag by 1-2 quarters. "
     "IMPORTANT: When citing an EPS figure that came from earnings-surprise / beat-miss data (actual vs estimate), "
     "explicitly label it 'non-GAAP (adjusted)' — this is Yahoo Finance's analyst-consensus basis, not the GAAP "
-    "diluted EPS a 10-Q/10-K reports. Never present it as GAAP EPS."
+    "diluted EPS a 10-Q/10-K reports. Never present it as GAAP EPS. "
+    "IMPORTANT: If an agent's own output for a topic is a refusal or disclaimer (e.g. 'I cannot provide financial "
+    "advice', 'I don't have real-time data') but [WEB SEARCH RESULTS] are ALSO present below, that refusal only "
+    "means the agent itself had no data to work with — it does NOT mean no answer exists. In that case, base your "
+    "answer primarily on the web search results and their sources, not on the agent's refusal wording."
 )
 
 # ---------------------------------------------------------------------------

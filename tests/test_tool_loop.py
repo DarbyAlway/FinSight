@@ -2,7 +2,22 @@
 import json
 from unittest.mock import MagicMock
 
+import httpx
+import openai
+
 from agents._tooling import run_tool_loop
+
+
+def _bad_request_error(model_output: str) -> openai.BadRequestError:
+    """A real BadRequestError, matching what SambaNova raises when
+    tool_choice='required' is set but the model's reply has no function call."""
+    resp = httpx.Response(status_code=400, request=httpx.Request("POST", "http://x"))
+    return openai.BadRequestError(
+        "Specified tool_choice: \"required\", but the model output contains "
+        "zero valid function call.",
+        response=resp,
+        body={"error_model_output": model_output},
+    )
 
 
 def _tool_call(name, args, cid="c1"):
@@ -189,3 +204,25 @@ def test_tool_loop_returns_tool_blocks():
     key = list(tool_blocks.keys())[0]
     assert "get_financials" in key
     assert tool_blocks[key] == "Revenue: $400B"
+
+
+def test_falls_back_to_plain_answer_when_model_refuses_tool_call():
+    """SambaNova rejects tool_choice='required' with a 400 if the model's
+    reply has no function call in it — e.g. a vague question with nothing
+    concrete to look up. The loop must retry without forcing a tool call so
+    the model's own plain-text answer comes through, instead of crashing."""
+    call_count = {"n": 0}
+
+    def make(**kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            assert kwargs.get("tool_choice") == "required"
+            raise _bad_request_error("I need more information to help with that.")
+        assert "tool_choice" not in kwargs
+        return _resp(content="I need more information to help with that.")
+
+    client = MagicMock()
+    client.chat.completions.create.side_effect = make
+    out, _, _ = run_tool_loop("T", client, "m", [], [], {}, temperature=0.0)
+    assert out == "I need more information to help with that."
+    assert call_count["n"] == 2

@@ -6,6 +6,7 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import openai
 from langfuse import get_client
 
 _MAX_RESULT_CHARS = 3000
@@ -95,10 +96,19 @@ def run_tool_loop(
             logging.info("[%s] llm call: %dms (no usage)", agent_tag, dur)
         return r
 
-    response = _chat(
-        model=model, messages=messages, tools=tools,
-        tool_choice="required", temperature=temperature,
-    )
+    try:
+        response = _chat(
+            model=model, messages=messages, tools=tools,
+            tool_choice="required", temperature=temperature,
+        )
+    except openai.BadRequestError as e:
+        # SambaNova rejects tool_choice="required" outright when the model's
+        # reply has no function call in it — e.g. a vague question with
+        # nothing concrete to look up, where the model wants to ask for
+        # clarification in plain text instead. Retry once without forcing a
+        # tool call so that plain-text answer comes through normally.
+        logging.info("[%s] model gave no function call under tool_choice=required (%s) — retrying without it", agent_tag, e)
+        response = _chat(model=model, messages=messages, tools=tools, temperature=temperature)
     msg = response.choices[0].message
 
     seen: dict[tuple, str] = {}   # (name, args_json) -> cached result
