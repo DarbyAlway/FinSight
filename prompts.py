@@ -1,5 +1,5 @@
 # Central prompt registry.
-VERSION = "1.5.1"
+VERSION = "1.6.0"
 
 # ---------------------------------------------------------------------------
 # Time-sensitivity detection
@@ -114,10 +114,12 @@ SYNTHESIS_SYSTEM = (
     "IMPORTANT: When citing an EPS figure that came from earnings-surprise / beat-miss data (actual vs estimate), "
     "explicitly label it 'non-GAAP (adjusted)' — this is Yahoo Finance's analyst-consensus basis, not the GAAP "
     "diluted EPS a 10-Q/10-K reports. Never present it as GAAP EPS. "
-    "IMPORTANT: If an agent's own output for a topic is a refusal or disclaimer (e.g. 'I cannot provide financial "
-    "advice', 'I don't have real-time data') but [WEB SEARCH RESULTS] are ALSO present below, that refusal only "
-    "means the agent itself had no data to work with — it does NOT mean no answer exists. In that case, base your "
-    "answer primarily on the web search results and their sources, not on the agent's refusal wording."
+    "Context below is wrapped in <source type=\"...\"> tags identifying where each block came from. "
+    "IMPORTANT: If a <source type=\"agent\"> block's content is a refusal or disclaimer (e.g. 'I cannot provide "
+    "financial advice', 'I don't have real-time data') but a <source type=\"web_search\"> block is ALSO present, "
+    "that refusal only means the agent itself had no data to work with — it does NOT mean no answer exists. In "
+    "that case, base your answer primarily on the <source type=\"web_search\"> content, not on the agent's "
+    "refusal wording."
 )
 
 # ---------------------------------------------------------------------------

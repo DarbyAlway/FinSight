@@ -268,7 +268,8 @@ def _collect_node(state: dict) -> dict:
     for name in state.get("agents_to_run") or []:
         if name in agent_results:
             label = _SOURCE_LABELS.get(name, name.upper())
-            accumulated_context += f"\n\n[{label}]\n{agent_results[name]}"
+            accumulated_context += (
+                f'\n\n<source type="agent" label="{label}">\n{agent_results[name]}\n</source>')
     return {"accumulated_context": accumulated_context}
 
 
@@ -278,7 +279,8 @@ def _proactive_web_node(state: dict) -> dict:
     updates: dict = {"web_urls": urls}
     if web_snippets:
         updates["accumulated_context"] = (
-            state.get("accumulated_context", "") + f"\n\n[WEB SEARCH RESULTS]\n{web_snippets}")
+            state.get("accumulated_context", "")
+            + f'\n\n<source type="web_search" label="WEB SEARCH RESULTS">\n{web_snippets}\n</source>')
         logging.info("[Orchestrator] market_news → proactive web search (%d sources)", len(urls))
     return updates
 

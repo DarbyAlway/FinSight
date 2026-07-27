@@ -536,7 +536,7 @@ def test_context_headers_are_neutral_source_labels():
     synthesis_messages = mock_llm.call_args_list[1].args[1]
     context = synthesis_messages[-1]["content"]
     assert "AGENT]" not in context
-    assert "[MARKET DATA]" in context
+    assert 'label="MARKET DATA"' in context
 
 
 def test_web_synthesis_authorizes_web_figures():

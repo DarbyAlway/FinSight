@@ -62,8 +62,8 @@ def test_collect_node_orders_context_with_neutral_labels():
         "agent_results": {"ratios": "MARGIN DATA", "financials": "PRICE DATA"},
     })
     ctx = out["accumulated_context"]
-    assert ctx.index("[MARKET DATA]") < ctx.index("[SEC RATIOS]")   # plan order kept
-    assert "AGENT]" not in ctx
+    assert ctx.index('label="MARKET DATA"') < ctx.index('label="SEC RATIOS"')   # plan order kept
+    assert 'name="financials"' not in ctx and 'name="ratios"' not in ctx  # internal agent names not leaked
 
 
 def test_fidelity_node_flags_hard_raws():
@@ -145,7 +145,7 @@ def test_proactive_web_node_with_snippets_appends_context():
                return_value=("snippet text", ["http://example.com"])):
         out = _proactive_web_node(state)
     assert out["web_urls"] == ["http://example.com"]
-    assert "[WEB SEARCH RESULTS]" in out["accumulated_context"]
+    assert '<source type="web_search" label="WEB SEARCH RESULTS">' in out["accumulated_context"]
     assert "snippet text" in out["accumulated_context"]
     # existing context should be preserved
     assert "[NEWS]" in out["accumulated_context"]
