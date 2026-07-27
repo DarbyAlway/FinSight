@@ -1,0 +1,41 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	plan(plan)
+	gates(gates)
+	agent(agent)
+	collect(collect)
+	proactive_web(proactive_web)
+	synthesize(synthesize)
+	web_fallback(web_fallback)
+	fidelity_check(fidelity_check)
+	self_critique(self_critique)
+	web_escalate(web_escalate)
+	finalize(finalize)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> plan;
+	agent --> collect;
+	collect -.-> proactive_web;
+	collect -.-> synthesize;
+	fidelity_check -.-> finalize;
+	fidelity_check -.-> self_critique;
+	gates -.-> agent;
+	gates -.-> collect;
+	plan --> gates;
+	proactive_web --> synthesize;
+	self_critique -.-> finalize;
+	self_critique -.-> web_escalate;
+	synthesize -.-> fidelity_check;
+	synthesize -.-> finalize;
+	synthesize -.-> web_fallback;
+	web_escalate --> finalize;
+	web_fallback -.-> fidelity_check;
+	web_fallback -.-> finalize;
+	finalize --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
