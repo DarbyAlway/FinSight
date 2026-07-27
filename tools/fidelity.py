@@ -42,12 +42,12 @@ def _to_float(digits: str) -> float:
     return float(digits.replace(",", ""))
 
 
-def _iter_number_matches(text: str) -> list[tuple[int, Number]]:
+def _iter_number_matches(text: str) -> list[tuple[int, Number]]: # one number in text can look like it matches multiple regexes at once.
     """Yield (start_offset, Number) for every UNIT-BEARING number, de-overlapped
     in priority order. Bare integers, counts, and 4-digit years are ignored."""
     consumed: list[tuple[int, int]] = []  # spans already claimed, highest priority first
 
-    def _claim(m) -> bool:
+    def _claim(m) -> bool: # check if it's overlap or not
         s, e = m.span()
         for cs, ce in consumed:
             if s < ce and cs < e:  # overlaps an already-claimed span
@@ -56,7 +56,7 @@ def _iter_number_matches(text: str) -> list[tuple[int, Number]]:
         return True
 
     out: list[tuple[int, Number]] = []
-    # priority: money (suffix) > money (word) > dollars > percent > ratio
+    # priority: money (suffix) > money (word) > dollars > percent > ratio because without it the same substring gets extracted as two different, contradictory numbers
     for m in _MONEY_RE.finditer(text):
         if _claim(m):
             out.append((m.start(), Number(m.group(0).strip(), _to_float(m.group(1)) * _MAG[m.group(2)], "money_millions")))
@@ -83,7 +83,7 @@ def extract_numbers(text: str) -> list[Number]:
     return [num for _, num in _iter_number_matches(text)]
 
 
-def _nearest_year(start: int, year_positions: list[tuple[int, int]]) -> int | None:
+def _nearest_year(start: int, year_positions: list[tuple[int, int]]) -> int | None: # Fallback for every number that didnt get bound by the enum
     """Pick the fiscal year for a number at offset `start`. Prefer the closest
     year token AT OR AFTER the number ('$391,035M in FY2024' — the dominant prose
     pattern, and how tool lines read: 'Revenue: 391,035M  (Sep 28, 2024)'); fall

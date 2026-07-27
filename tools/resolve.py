@@ -182,6 +182,7 @@ def resolve_company(name: str) -> ResolveResult:
 
 def _verbatim_symbols(query: str) -> list[str]:
     """Tickers the user literally typed (uppercase, valid, not a finance stopword)."""
+    # The regex pulls out word-like tokens up to 6 characters long (a letter, then up to 5 more letters/dots/dashes), which covers real ticker shapes like "AAPL" or "BRK.B".
     out: list[str] = []
     for tok in re.findall(r"[A-Za-z][A-Za-z.\-]{0,5}", query or ""):
         if tok.isupper() and tok not in _VERBATIM_STOPWORDS and ticker_db.is_valid_symbol(tok):
@@ -193,6 +194,7 @@ def _alias_in_query(query: str) -> list[str]:
     """Apply curated aliases to CAPITALIZED tokens in the query, so common-word
     company names GLiNER won't tag (Square, Block) still resolve. Capitalization
     is required to avoid firing on the ordinary verb ("block these ads")."""
+    # This regex matches capitalized word-like tokens (starts with an uppercase letter, e.g. "Square" or "Block") — lowercase words are skipped so the ordinary verb "block" in "block these ads" doesn't accidentally match.
     out: list[str] = []
     for tok in re.findall(r"[A-Z][A-Za-z.\-]+", query or ""):
         sym = _ALIASES.get(ticker_db._normalize_name(tok))
@@ -204,6 +206,10 @@ def _alias_in_query(query: str) -> list[str]:
 def _semantic_lookup(query: str, floor: float = SEMANTIC_FLOOR) -> str | None:
     """Tier 5 — descriptive references ("the iPhone maker") via company-profile
     embeddings, gated by score. Fails open (returns None) if Qdrant is down."""
+    # This is the fallback tier for queries that don't name a company directly, e.g. "the iPhone maker" instead of "Apple".
+    # Every company's profile text is stored in Qdrant (a vector database) as an "embedding" — a list of numbers that captures its meaning, not just its exact words.
+    # search_company_profiles_scored turns the query into the same kind of number list and finds the closest-meaning stored profile, along with a similarity score from 0 to 1 (1 = identical meaning).
+    # "floor" is the minimum score we'll trust — below it, we'd rather say "unresolved" than guess.
     try:
         from tools.vector import _get_qdrant, search_company_profiles_scored
         hits = search_company_profiles_scored(_get_qdrant(), query, top_k=1)
@@ -239,9 +245,14 @@ def resolve_query(query: str, names: list[str] | None = None) -> tuple[list[str]
         else:
             pending.append(r)
 
-    # de-dupe, preserve order
+    # De-dupe while preserving order: walk the list once, keep the first time each symbol appears, drop any repeats.
     seen: set[str] = set()
-    resolved = [s for s in resolved if not (s in seen or seen.add(s))]
+    deduped: list[str] = []
+    for s in resolved:
+        if s not in seen:
+            seen.add(s)
+            deduped.append(s)
+    resolved = deduped
 
     if not resolved:
         sym = _semantic_lookup(query)

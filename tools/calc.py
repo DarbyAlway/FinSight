@@ -31,11 +31,15 @@ def calculate_revenue_cagr(ticker: str, years: int = 3) -> str:
     series = _get_revenue_by_year(ticker)
     if len(series) < 2:
         return f"ERROR: No revenue data found for {ticker} — call get_income_statement first."
+    # Keep only the last N+1 years of data, since CAGR only needs a start point and an end point — everything in between is ignored.
     series = series[-max(years + 1, 2):]
     start_date, start_val = series[0]
     end_date, end_val = series[-1]
     if start_val <= 0:
         return f"ERROR: Invalid start revenue for {ticker}."
+    # CAGR (Compound Annual Growth Rate) answers "what single steady yearly growth rate, applied every year, would turn start_val into end_val over this many years?"
+    # The formula is (end/start) raised to the power of (1 / number of years), minus 1.
+    # Using the exact number of days between the two dates (instead of just counting calendar years) keeps this accurate even when the years aren't exactly 365 days apart.
     actual_years = (end_date - start_date).days / 365.25
     if actual_years <= 0:
         return f"ERROR: Insufficient date range for {ticker} CAGR."
@@ -139,12 +143,17 @@ def calculate_peg(ticker: str) -> str:
     start_val, end_val = by_year[years[0]], by_year[years[-1]]
     if start_val <= 0:
         return f"ERROR: Invalid net income start value for {ticker}."
+    # Same CAGR-style formula as calculate_revenue_cagr above, but applied to net income instead of revenue.
+    # This gives an annualised earnings growth rate as a percentage (e.g. 15.0 means "15% per year").
     n_years = (
         (_parse_fiscal_year(years[-1]) - _parse_fiscal_year(years[0])).days / 365.25
     )
     eps_growth_rate = ((end_val / start_val) ** (1 / n_years) - 1) * 100
     if eps_growth_rate <= 0:
         return f"{ticker} PEG: N/A (negative EPS growth rate: {eps_growth_rate:.1f}%)"
+    # PEG = P/E divided by the growth rate.
+    # It's a way of asking "is this stock's price expensive relative to how fast its earnings are growing?"
+    # PEG < 1 is the common rule-of-thumb for "cheap relative to growth".
     peg = pe / eps_growth_rate
     return (
         f"{ticker} PEG Ratio:\n"
@@ -157,6 +166,17 @@ def calculate_peg(ticker: str) -> str:
 def calculate_dcf(
     ticker: str, growth_rate: float = 0.10, discount_rate: float = 0.10
 ) -> str:
+    terminal_growth = 0.03
+    # The terminal-value formula below divides by (discount_rate - terminal_growth).
+    # If discount_rate is equal to terminal_growth that's a division by zero (crash).
+    # If it's LOWER, the result is a large negative number that looks like a valid answer but is actually nonsense.
+    # Catch both cases here before doing any work.
+    if discount_rate <= terminal_growth:
+        return (
+            f"ERROR: discount_rate ({discount_rate:.1%}) must be greater than "
+            f"the assumed terminal growth rate ({terminal_growth:.1%}) for a "
+            "DCF to be valid."
+        )
     op_rows = fuzzy_query(ticker, "operating income")
     if not op_rows:
         return f"ERROR: No operating income data for {ticker} — call get_income_statement first."
@@ -169,11 +189,15 @@ def calculate_dcf(
     latest_fy = max(by_year.keys(), key=_parse_fiscal_year)
     base_fcf = by_year[latest_fy] * 1_000_000  # millions → dollars
 
-    terminal_growth = 0.03
+    # DCF (Discounted Cash Flow) estimates what a company is worth TODAY by projecting its future cash flows and converting each one back to today's dollars.
+    # A dollar next year is worth less than a dollar today, so we "discount" it — divide by (1 + discount_rate) raised to how many years away it is.
     pv_total = 0.0
+    # Project 5 years of cash flow, growing each year by growth_rate, and add up the discounted ("present value") version of each year.
     for t in range(1, 6):
         fcf_t = base_fcf * (1 + growth_rate) ** t
         pv_total += fcf_t / (1 + discount_rate) ** t
+    # The company doesn't stop existing after year 5, so "terminal value" estimates all cash flow from year 6 onward as one lump sum, assuming slower permanent growth (terminal_growth).
+    # It then discounts that lump sum back to today the same way.
     fcf_5 = base_fcf * (1 + growth_rate) ** 5
     terminal_value = fcf_5 * (1 + terminal_growth) / (discount_rate - terminal_growth)
     pv_total += terminal_value / (1 + discount_rate) ** 5
@@ -302,6 +326,8 @@ def calculate_cash_runway(ticker: str) -> str:
         lines.append("  Runway: N/A (FCF positive — company is cash-generative)")
         return "\n".join(lines)
 
+    # "Runway" = how many months the company can keep operating before it runs out of cash, if it keeps burning cash at the current yearly rate.
+    # cash_balance / annual_burn gives years of runway, so multiply by 12 to express it in months instead.
     annual_burn = abs(latest_fcf)
     runway_months = (cash_balance / annual_burn) * 12
 
@@ -409,6 +435,9 @@ def calculate_correlation(tickers: list[str], period: str = "1y") -> str:
     if len(frames) < 2:
         return f"ERROR: Need at least 2 tickers with price data. Got: {list(frames.keys())}"
 
+    # Build one table (a pandas DataFrame) with a column of closing prices per ticker, aligned by date.
+    # pct_change() turns each price into "percent change from the previous day" (daily returns), since comparing raw prices would be misleading — two stocks can move together in percentage terms while having very different price levels.
+    # corr() then computes, for every pair of tickers, how closely their daily returns move together: +1 = always move the same direction, -1 = always opposite, 0 = unrelated.
     df = pd.DataFrame(frames).dropna()
     returns = df.pct_change().dropna()
     corr = returns.corr()

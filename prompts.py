@@ -105,7 +105,10 @@ SYNTHESIS_SYSTEM = (
     "If data for a specific metric is unavailable, state that clearly in one sentence and move on. "
     "IMPORTANT: When citing financial ratios (margins, debt/equity, ROA, ROE), "
     "always prefer values from the 'ratios' agent (SEC 10-K sourced) over values from 'financials' (yfinance). "
-    "If only yfinance values are available, note they may lag by 1-2 quarters."
+    "If only yfinance values are available, note they may lag by 1-2 quarters. "
+    "IMPORTANT: When citing an EPS figure that came from earnings-surprise / beat-miss data (actual vs estimate), "
+    "explicitly label it 'non-GAAP (adjusted)' — this is Yahoo Finance's analyst-consensus basis, not the GAAP "
+    "diluted EPS a 10-Q/10-K reports. Never present it as GAAP EPS."
 )
 
 # ---------------------------------------------------------------------------
@@ -132,6 +135,8 @@ FINANCIALS_SYSTEM = (
     "Never present these as quarterly figures. "
     "Use for: annual cash generation, burn rate, capital expenditure. "
     "get_earnings_press_release(ticker) → EPS actual vs estimate, beat/miss, guidance. "
+    "This EPS is Yahoo Finance's analyst-consensus (non-GAAP/adjusted) basis, NOT the GAAP diluted EPS "
+    "from the SEC filing — always label it 'non-GAAP' / 'adjusted' when citing it. "
     "Use for: earnings surprises, analyst estimate vs actual, management guidance. "
     "Return key figures under each ## TICKER header. Always cite the fiscal year or data date."
 )

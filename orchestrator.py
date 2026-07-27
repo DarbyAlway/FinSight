@@ -63,6 +63,8 @@ def _synthesis_step(messages: list[dict], temperature: float = 0.3) -> tuple[str
 
 def _parse_plan(content: str) -> dict:
     content = content.strip()
+    # The planner LLM sometimes wraps its JSON in extra text (e.g. "Here is the plan: {...}").
+    # So pull out just the {...} part instead of trusting the whole response to be valid JSON on its own.
     match = re.search(r'\{.*\}', content, re.DOTALL)
     parsed = json.loads(match.group() if match else content)
     if not isinstance(parsed, dict):
@@ -100,6 +102,14 @@ def _route_after_gates(state: dict):
     tickers = state.get("tickers") or []
     ticker_hint = f"[Use exactly these tickers: {', '.join(tickers)}]\n" if tickers else ""
     agent_input = ticker_hint + state["user_input"]
+    # Send(...) is LangGraph's way of starting several parallel branches from one node.
+    # Instead of running each planned agent (financials, news, calc, ratios) one after another, this returns a list of Send objects.
+    # That makes the graph launch the "agent" node once per name, all at the same time, and wait for them all to finish before moving on to "collect".
+    #
+    # What actually triggers parallel vs sequential is the TYPE of value a routing function returns, not anything about Send itself.
+    # Returning a plain string (like "collect" above) means "go to this one node next" (sequential).
+    # Returning a LIST of Send objects, like this function does below, tells LangGraph to run the target node once per item in the list, all at the same time, each with its own state.
+    # They all still land on the same next step afterward, because build_graph() wires a single plain edge from "agent" to "collect" regardless of how many parallel "agent" runs fed into it.
     return [
         Send("agent", {
             "agent_name": name,
@@ -447,6 +457,11 @@ _NODE_STAGE = {
 
 
 def build_graph(checkpointer=None):
+    # This function wires together the whole pipeline as a graph.
+    # Each add_node call registers one step (a Python function that reads/writes the shared state dict).
+    # Each add_edge/add_conditional_edges call says "after this step, go to that step next".
+    # Conditional edges pick the next step at runtime by calling a routing function (e.g. _route_after_synthesis) instead of always going to the same place.
+    # That's how the graph decides things like "does this answer need a web fallback?" or "does it need a fidelity check?".
     g = StateGraph(TurnState)
     g.add_node("plan", _plan_node)
     g.add_node("gates", _gates_node)
@@ -537,8 +552,13 @@ def process_turn(
     resuming = thread_id is not None and bool(_GRAPH.get_state(config).next)
     graph_input = None if resuming else initial_state
     if on_stage is None:
+        # No progress callback given, so just run the whole graph in one call
+        # and wait for the final answer — this is the simple/default path.
         final_state = _GRAPH.invoke(graph_input, config)
     else:
+        # A progress callback WAS given (the web app uses this to show a live "planning… fetching… writing… verifying…" indicator).
+        # Instead of invoke(), use stream(..., stream_mode="updates") which yields the state change produced by each node as soon as that node finishes, one node at a time.
+        # We map each finished node to a coarser stage name via _NODE_STAGE and only call on_stage() when the stage actually changes, so the UI doesn't get spammed with every internal node name.
         last_stage = None
         tickers: list = []
         agents: list = []
@@ -556,6 +576,8 @@ def process_turn(
                             detail += ": " + ", ".join(agents)
                     on_stage(stage, detail)
                     last_stage = stage
+        # Streaming only gives us incremental deltas, not the final merged state.
+        # So after the loop ends we fetch the graph's full final state the same way invoke() would have returned it.
         final_state = _GRAPH.get_state(config).values
     answer = final_state.get("answer", "")
     tokens = final_state.get("tokens", {})

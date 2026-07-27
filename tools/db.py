@@ -415,6 +415,7 @@ def save_earnings(rows: list[dict]):
 
 def load_earnings(ticker: str) -> str:
     with connect() as con:
+        # Grab the 4 most recent earnings releases we have saved for this ticker.
         rows = con.execute(
             """SELECT period_end, eps_actual, eps_estimate, beat_miss,
                       revenue_actual, guidance_text
@@ -424,15 +425,49 @@ def load_earnings(ticker: str) -> str:
                LIMIT 4""",
             (ticker,)
         ).fetchall()
+        # Fiscal quarter labels (e.g. NVDA's Jan-year-end) come from the SEC filing
+        # itself via quarterly_statements.quarter_label — calendar-quarter math from
+        # the period-end month is wrong for any company whose fiscal year isn't
+        # calendar-aligned, so borrow the label edgartools already parsed instead
+        # of recomputing it.
+        fiscal_rows = con.execute(
+            "SELECT DISTINCT period_end, quarter_label FROM quarterly_statements "
+            "WHERE ticker = ? AND quarter_label != ''",
+            (ticker,)
+        ).fetchall()
     if not rows:
         return ""
+    # Turn the (period_end, quarter_label) pairs into a dict so we can look up a label by date directly, e.g. fiscal_labels["2025-01-26"] -> "Q4 FY2025".
+    fiscal_labels = dict(fiscal_rows)
+
+    # The two tables don't always store dates in the same text format (one might say "2025-01-26", the other "Jan 26, 2025").
+    # So this turns either style into a real date object we can compare and subtract.
+    # Returns None if the string doesn't match either known format.
+    def _parse_date(s: str):
+        for fmt in ("%Y-%m-%d", "%b %d, %Y"):
+            try:
+                return datetime.strptime(s, fmt)
+            except Exception:
+                continue
+        return None
+
     lines = [f"{ticker} Earnings (last {len(rows)} quarters)"]
     for period_end, eps_actual, eps_estimate, beat_miss, revenue_actual, guidance_text in rows:
-        try:
-            dt = datetime.strptime(period_end, "%Y-%m-%d")
-            label = f"Q{(dt.month - 1) // 3 + 1} {dt.year} ({dt.strftime('%b %d, %Y')})"
-        except Exception:
-            label = period_end
+        # First try an exact date match against the fiscal labels we loaded above.
+        fiscal_label = fiscal_labels.get(period_end)
+        target = _parse_date(period_end)
+        # SEC filing dates and our saved earnings dates can be off by a few days (e.g. the filing date vs. the actual quarter-end date).
+        # So if there was no exact match, look for a fiscal label within 10 days of this date instead of giving up.
+        if fiscal_label is None and target is not None:
+            for pe, ql in fiscal_labels.items():
+                pe_dt = _parse_date(pe)
+                if pe_dt is not None and abs((pe_dt - target).days) <= 10:
+                    fiscal_label = ql
+                    break
+        date_str = target.strftime('%b %d, %Y') if target is not None else period_end
+        # If we still don't have a fiscal label at this point, show the date plainly and mark it "unconfirmed" rather than guessing at a quarter name that might be wrong.
+        label = f"{fiscal_label} ({date_str})" if fiscal_label else f"period ending {date_str} (fiscal quarter unconfirmed)"
+        # How far actual EPS beat or missed the analyst estimate, as a percent.
         pct = ""
         if eps_estimate:
             pct = f" ({(eps_actual - eps_estimate) / abs(eps_estimate) * 100:+.1f}%)"

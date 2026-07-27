@@ -89,6 +89,11 @@ def calculate_debt_to_equity(ticker: str) -> str:
             return f"ERROR: No balance sheet data for {ticker} — call get_balance_sheet first."
         fy = fy_row[0]
 
+        # Different companies name the same balance-sheet line differently
+        # (e.g. "Long-term debt" vs "Convertible notes"), so we try several
+        # LIKE patterns and add up whatever matches, while seen_items makes
+        # sure the same line item isn't counted twice if it matches more than
+        # one pattern.
         debt_items: list[tuple[str, float]] = []
         seen_items: set[str] = set()
         for pattern in DEBT_PATTERNS:
@@ -182,6 +187,9 @@ def calculate_roa_roe(ticker: str) -> str:
         net = net_by_year[fy]
         assets = assets_by_year[fy]
         equity = equity_by_year.get(fy)
+        # ROA (Return on Assets) = how much profit the company makes per dollar of everything it owns.
+        # ROE (Return on Equity) = how much profit per dollar the shareholders actually put in (equity is assets minus debt).
+        # ROE is usually higher than ROA, since the same profit is divided by a smaller number.
         roa = net / assets if assets else None
         roe = net / equity if equity else None
         equity_str = f"${equity:,.0f}M" if equity is not None else "N/A"
@@ -245,6 +253,9 @@ def calculate_current_ratio(ticker: str) -> str:
 
 
 def calculate_interest_coverage(ticker: str) -> str:
+    # EBIT (Earnings Before Interest and Taxes) is approximated here using operating income.
+    # Interest coverage = EBIT divided by interest expense, i.e. "how many times over could this company pay its interest bill out of its operating profit?"
+    # A higher number means more room to cover debt payments.
     ebit_rows = fuzzy_query(ticker, "operating income")
     if not ebit_rows:
         return f"ERROR: No operating income data for {ticker} — call get_income_statement first."
