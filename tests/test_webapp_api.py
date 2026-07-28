@@ -153,3 +153,63 @@ def test_post_message_to_missing_chat_is_404(client):
     r = client.post("/chats/00000000-0000-0000-0000-000000000000/messages",
                     json={"content": "hi"})
     assert r.status_code == 404
+
+
+class _SyncThread:
+    """Test stand-in for threading.Thread that runs its target immediately
+    instead of on a real thread, so title-generation completes before the
+    test asserts on it."""
+    def __init__(self, target=None, daemon=None):
+        self._target = target
+
+    def start(self):
+        self._target()
+
+
+@pg_required
+def test_post_message_generates_title_on_first_message(client, monkeypatch):
+    monkeypatch.setattr("webapp.app.threading.Thread", _SyncThread)
+
+    r = client.post("/chats", json={"title": "New chat"})
+    chat_id = r.json()["id"]
+
+    def fake_process_turn(user_input, history, persona_system=None, on_stage=None, on_usage=None):
+        ans = "Revenue was 391,035M in FY2024."
+        return (ans, history + [
+            {"role": "user", "content": user_input},
+            {"role": "assistant", "content": ans},
+        ])
+
+    with _patch("webapp.turn_runner.process_turn", side_effect=fake_process_turn), \
+         _patch("webapp.app.generate_title", return_value=("AAPL Q4 Revenue", 7)):
+        with client.stream("POST", f"/chats/{chat_id}/messages",
+                           json={"content": "AAPL revenue?"}) as resp:
+            "".join(resp.iter_text())
+
+    chat = client.get(f"/chats/{chat_id}").json()
+    assert chat["title"] == "AAPL Q4 Revenue"
+
+
+@pg_required
+def test_post_message_does_not_regenerate_title_on_second_message(client, monkeypatch):
+    monkeypatch.setattr("webapp.app.threading.Thread", _SyncThread)
+
+    r = client.post("/chats", json={"title": "New chat"})
+    chat_id = r.json()["id"]
+
+    def fake_process_turn(user_input, history, persona_system=None, on_stage=None, on_usage=None):
+        return ("ok", history + [
+            {"role": "user", "content": user_input},
+            {"role": "assistant", "content": "ok"},
+        ])
+
+    with _patch("webapp.turn_runner.process_turn", side_effect=fake_process_turn), \
+         _patch("webapp.app.generate_title", return_value=("first title", 1)) as mock_title:
+        with client.stream("POST", f"/chats/{chat_id}/messages", json={"content": "first?"}) as resp:
+            "".join(resp.iter_text())
+        with client.stream("POST", f"/chats/{chat_id}/messages", json={"content": "second?"}) as resp:
+            "".join(resp.iter_text())
+
+    assert mock_title.call_count == 1
+    chat = client.get(f"/chats/{chat_id}").json()
+    assert chat["title"] == "first title"

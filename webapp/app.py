@@ -5,6 +5,7 @@ turn through the orchestrator. No auth in this plan (Plan 4); no ask-back/resume
 (Plan 3).
 """
 import os
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -13,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from webapp import accounts, auth, db
+from webapp.title_gen import generate_title
 from webapp.turn_runner import stream_turn
 
 
@@ -162,6 +164,17 @@ def send_message(chat_id: str, body: SendMessage, request: Request,
     def on_usage(total_tokens: int):
         accounts.add_user_tokens(user["user_id"], total_tokens)
         accounts.record_usage(user["user_id"], total_tokens, ip, ua)
+
+    # On the chat's very first message, generate a short title in the background
+    # so it never slows down or breaks the main answer. generate_title already
+    # catches its own errors, so this thread can't crash the request.
+    if not history:
+        def generate_and_save_title():
+            title, tokens = generate_title(body.content)
+            db.update_chat_title(chat_id, title)
+            if tokens:
+                on_usage(tokens)
+        threading.Thread(target=generate_and_save_title, daemon=True).start()
 
     return StreamingResponse(
         stream_turn(user_input=body.content, history=history,
