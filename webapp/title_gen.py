@@ -16,8 +16,11 @@ _TITLE_PROMPT = (
 
 
 # Truncate text to fallback length, adding ellipsis if needed.
+# If nothing is left after stripping whitespace, use "New chat" instead of an empty title.
 def _truncate_fallback(user_message: str) -> str:
     text = user_message.strip()
+    if not text:
+        return "New chat"
     if len(text) <= _TRUNCATE_LEN:
         return text
     return text[:_TRUNCATE_LEN].rstrip() + "…"

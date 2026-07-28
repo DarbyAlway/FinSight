@@ -49,3 +49,24 @@ def test_generate_title_caps_long_llm_output():
 
     assert title == "A" * 60
     assert tokens == 10
+
+
+def test_generate_title_whitespace_message_with_empty_llm_output_falls_back_to_new_chat():
+    from webapp.title_gen import generate_title
+
+    # The LLM returns an empty title (whitespace-only, so nothing left after stripping).
+    with patch("webapp.title_gen.llm_chat", return_value=("   ", 3)):
+        title, tokens = generate_title("   ")
+
+    assert title == "New chat"
+    assert tokens == 3
+
+
+def test_generate_title_whitespace_message_with_llm_error_falls_back_to_new_chat():
+    from webapp.title_gen import generate_title
+
+    with patch("webapp.title_gen.llm_chat", side_effect=RuntimeError("boom")):
+        title, tokens = generate_title("   ")
+
+    assert title == "New chat"
+    assert tokens == 0

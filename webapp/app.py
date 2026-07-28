@@ -4,6 +4,7 @@ CRUD over chats/messages (Postgres) plus an SSE endpoint (next task) that runs a
 turn through the orchestrator. No auth in this plan (Plan 4); no ask-back/resume
 (Plan 3).
 """
+import logging
 import os
 import threading
 from contextlib import asynccontextmanager
@@ -165,15 +166,17 @@ def send_message(chat_id: str, body: SendMessage, request: Request,
         accounts.add_user_tokens(user["user_id"], total_tokens)
         accounts.record_usage(user["user_id"], total_tokens, ip, ua)
 
-    # On the chat's very first message, generate a short title in the background
-    # so it never slows down or breaks the main answer. generate_title already
-    # catches its own errors, so this thread can't crash the request.
+    # On the chat's very first message, generate a short title in the background so it never slows down the main answer.
+    # Errors are caught here so a DB blip can't kill the thread or lose the title's token count.
     if not history:
         def generate_and_save_title():
-            title, tokens = generate_title(body.content)
-            db.update_chat_title(chat_id, title)
-            if tokens:
-                on_usage(tokens)
+            try:
+                title, tokens = generate_title(body.content)
+                db.update_chat_title(chat_id, title)
+                if tokens:
+                    on_usage(tokens)
+            except Exception:
+                logging.exception("Background title generation failed for chat %s", chat_id)
         threading.Thread(target=generate_and_save_title, daemon=True).start()
 
     return StreamingResponse(

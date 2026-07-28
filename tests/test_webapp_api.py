@@ -189,6 +189,10 @@ def test_post_message_generates_title_on_first_message(client, monkeypatch):
     chat = client.get(f"/chats/{chat_id}").json()
     assert chat["title"] == "AAPL Q4 Revenue"
 
+    # The 7 title-gen tokens must be billed to the user just like main-turn tokens.
+    me = client.get("/auth/me").json()
+    assert me["tokens_used"] == 7
+
 
 @pg_required
 def test_post_message_does_not_regenerate_title_on_second_message(client, monkeypatch):
