@@ -61,6 +61,13 @@ def create_chat(user_id: str, title: str = "New chat") -> str:
     return chat_id
 
 
+def update_chat_title(chat_id: str, title: str) -> None:
+    # Update the title of an existing chat.
+    pool = _require_pool()
+    with pool.connection() as conn:
+        conn.execute("UPDATE chats SET title = %s WHERE chat_id = %s", (title, chat_id))
+
+
 def list_chats(user_id: str) -> list[dict]:
     """The user's chats, most-recently-updated first (for the sidebar)."""
     pool = _require_pool()

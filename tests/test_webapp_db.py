@@ -82,3 +82,10 @@ def test_delete_chat_removes_it_and_messages(db):
 
 def test_get_missing_chat_returns_none(db):
     assert db.get_chat("00000000-0000-0000-0000-000000000000", USER) is None
+
+
+def test_update_chat_title_changes_title(db):
+    chat_id = db.create_chat(USER, title="New chat")
+    db.update_chat_title(chat_id, "AAPL Q4 Revenue")
+    chat = db.get_chat(chat_id, USER)
+    assert chat["title"] == "AAPL Q4 Revenue"
