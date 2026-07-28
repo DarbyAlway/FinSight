@@ -15,6 +15,7 @@ _TITLE_PROMPT = (
 )
 
 
+# Truncate text to fallback length, adding ellipsis if needed.
 def _truncate_fallback(user_message: str) -> str:
     text = user_message.strip()
     if len(text) <= _TRUNCATE_LEN:
@@ -26,6 +27,7 @@ def generate_title(user_message: str) -> tuple[str, int]:
     """Returns (title, tokens_used). On any llm_chat failure, falls back to a
     truncated version of user_message and reports 0 tokens (nothing was
     billed)."""
+    # Call the LLM to generate a concise title from the user's message.
     try:
         content, tokens = llm_chat(
             model=MODEL_AGENT,
@@ -37,6 +39,7 @@ def generate_title(user_message: str) -> tuple[str, int]:
     except Exception:
         return _truncate_fallback(user_message), 0
 
+    # Remove whitespace and quotes; if empty, use fallback text; otherwise limit to maximum length.
     title = content.strip().strip('"').strip("'")
     if not title:
         return _truncate_fallback(user_message), tokens
