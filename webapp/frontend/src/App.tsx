@@ -12,6 +12,7 @@ export default function App() {
   const currentChatId = useChatStore((s) => s.currentChatId);
   const messages = useChatStore((s) => s.messages);
   const status = useChatStore((s) => s.status);
+  const sending = useChatStore((s) => s.sending);
   const stage = useChatStore((s) => s.stage);
   const error = useChatStore((s) => s.error);
   const loadChats = useChatStore((s) => s.loadChats);
@@ -134,7 +135,7 @@ export default function App() {
             {error}
           </div>
         )}
-        <Composer disabled={status === 'streaming'} onSend={send} />
+        <Composer disabled={status === 'streaming' || sending} onSend={send} />
       </main>
     </div>
   );

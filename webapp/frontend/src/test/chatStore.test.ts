@@ -19,7 +19,7 @@ import { createChat } from '../api/client';
 
 beforeEach(() => {
   useChatStore.setState({
-    chats: [], currentChatId: null, messages: [], status: 'idle', stage: null, error: null,
+    chats: [], currentChatId: null, messages: [], status: 'idle', stage: null, error: null, sending: false,
   });
   vi.clearAllMocks();
 });
@@ -56,6 +56,16 @@ test('send with no current chat creates one first, then sends to it', async () =
   expect(s.currentChatId).toBe('c1');
   expect(s.messages.map((m) => m.role)).toEqual(['user', 'assistant']);
   expect(s.status).toBe('idle');
+});
+
+test('a second send() call while the first is still in flight is ignored (no duplicate chat)', async () => {
+  useChatStore.setState({ currentChatId: null });
+  // Fire both sends without awaiting the first one first, like a fast double-submit would.
+  const p1 = useChatStore.getState().send('A');
+  const p2 = useChatStore.getState().send('B');
+  await Promise.all([p1, p2]);
+  // Only the first call should have gone through and created a chat.
+  expect(createChat).toHaveBeenCalledTimes(1);
 });
 
 test('send with no current chat sets error state if chat creation fails', async () => {

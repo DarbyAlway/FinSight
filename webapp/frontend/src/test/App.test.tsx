@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 
@@ -22,6 +22,7 @@ vi.mock('../api/auth', () => ({
 
 import App from '../App';
 import { useAuthStore } from '../store/authStore';
+import { useChatStore } from '../store/chatStore';
 
 // jsdom does not evaluate Tailwind `md:` media queries, so this asserts the
 // drawer toggle STATE (conditional rendering of the backdrop), not the CSS.
@@ -47,4 +48,18 @@ test('composer is enabled and shows the new placeholder before any chat is selec
 
   expect(await screen.findByText('Ask about a stock to start a new chat.')).toBeInTheDocument();
   expect(screen.getByPlaceholderText('Ask about a stock…')).not.toBeDisabled();
+});
+
+test('composer is disabled and shows "…" while a chat is being created (sending true)', async () => {
+  useAuthStore.setState({ user: _u, status: 'authed' });
+  render(<App />);
+
+  await screen.findByText('Ask about a stock to start a new chat.');
+  // Simulate the store mid-way through auto-creating a chat for the first message.
+  act(() => {
+    useChatStore.setState({ sending: true });
+  });
+
+  expect(await screen.findByPlaceholderText('Ask about a stock…')).toBeDisabled();
+  expect(screen.getByText('…')).toBeInTheDocument();
 });

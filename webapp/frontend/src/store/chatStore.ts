@@ -10,6 +10,7 @@ interface ChatState {
   status: StreamStatus;
   stage: StageInfo | null;
   error: string | null;
+  sending: boolean;
   loadChats: () => Promise<void>;
   selectChat: (id: string) => Promise<void>;
   newChat: () => Promise<void>;
@@ -24,6 +25,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   status: 'idle',
   stage: null,
   error: null,
+  sending: false,
 
   loadChats: async () => {
     set({ chats: await client.listChats() });
@@ -48,37 +50,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   send: async (content) => {
-    if (!get().currentChatId) {
+    // If a send is already running, ignore this call.
+    // Without this, hitting Enter twice fast (before a chat exists) could create two chats at once.
+    if (get().sending) return;
+    // Mark "sending" true right away, before any await, so the guard above works immediately.
+    set({ sending: true });
+    try {
+      if (!get().currentChatId) {
+        // No chat is selected yet (e.g. the user typed on the root screen), so create one first.
+        // This lets the user send a message directly without clicking "New chat" first.
+        try {
+          await get().newChat();
+        } catch (err) {
+          set({ error: err instanceof Error ? err.message : String(err), status: 'error', stage: null });
+          return;
+        }
+      }
+      const id = get().currentChatId;
+      // newChat() should always set an id, so this should not happen in practice.
+      // Kept as a cheap safety check in case it ever resolves without doing so.
+      if (!id) return;
+      set((s) => ({
+        messages: [...s.messages, { role: 'user', content }],
+        status: 'streaming',
+        stage: null,
+        error: null,
+      }));
       try {
-        await get().newChat();
+        await sendMessage(id, content, {
+          onStage: (stage, detail) => set({ stage: { stage, detail } }),
+          onAnswer: (markdown) =>
+            set((s) => ({
+              messages: [...s.messages, { role: 'assistant', content: markdown }],
+              status: 'idle',
+              stage: null,
+            })),
+          onError: (message) => set({ error: message, status: 'error', stage: null }),
+        });
       } catch (err) {
         set({ error: err instanceof Error ? err.message : String(err), status: 'error', stage: null });
-        return;
       }
+      // Refresh sidebar ordering after the turn (best-effort).
+      get().loadChats().catch(() => {});
+    } finally {
+      // Always clear the flag, no matter which path above we exited through.
+      set({ sending: false });
     }
-    const id = get().currentChatId;
-    if (!id) return;
-    set((s) => ({
-      messages: [...s.messages, { role: 'user', content }],
-      status: 'streaming',
-      stage: null,
-      error: null,
-    }));
-    try {
-      await sendMessage(id, content, {
-        onStage: (stage, detail) => set({ stage: { stage, detail } }),
-        onAnswer: (markdown) =>
-          set((s) => ({
-            messages: [...s.messages, { role: 'assistant', content: markdown }],
-            status: 'idle',
-            stage: null,
-          })),
-        onError: (message) => set({ error: message, status: 'error', stage: null }),
-      });
-    } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err), status: 'error', stage: null });
-    }
-    // Refresh sidebar ordering after the turn (best-effort).
-    get().loadChats().catch(() => {});
   },
 }));
