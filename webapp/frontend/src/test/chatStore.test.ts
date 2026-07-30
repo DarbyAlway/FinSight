@@ -47,3 +47,12 @@ test('send sets error state and keeps the user message on an error event', async
   expect(s.error).toContain('EDGAR timed out');
   expect(s.messages.map((m) => m.role)).toEqual(['user']);
 });
+
+test('send with no current chat creates one first, then sends to it', async () => {
+  useChatStore.setState({ currentChatId: null });
+  await useChatStore.getState().send('AAPL revenue?');
+  const s = useChatStore.getState();
+  expect(s.currentChatId).toBe('c1');
+  expect(s.messages.map((m) => m.role)).toEqual(['user', 'assistant']);
+  expect(s.status).toBe('idle');
+});

@@ -48,6 +48,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   send: async (content) => {
+    if (!get().currentChatId) {
+      await get().newChat();
+    }
     const id = get().currentChatId;
     if (!id) return;
     set((s) => ({
