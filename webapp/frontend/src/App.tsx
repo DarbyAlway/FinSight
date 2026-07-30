@@ -124,7 +124,7 @@ export default function App() {
             </>
           ) : (
             <div className="flex h-full items-center justify-center p-8 text-center text-neutral-500">
-              Select or start a chat.
+              Ask about a stock to start a new chat.
             </div>
           )}
         </div>
@@ -134,7 +134,7 @@ export default function App() {
             {error}
           </div>
         )}
-        <Composer disabled={status === 'streaming' || !currentChatId} onSend={send} />
+        <Composer disabled={status === 'streaming'} onSend={send} />
       </main>
     </div>
   );

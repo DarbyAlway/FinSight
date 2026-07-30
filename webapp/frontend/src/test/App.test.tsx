@@ -40,3 +40,11 @@ test('hamburger opens the sidebar drawer; backdrop closes it', async () => {
   await user.click(screen.getByLabelText('Close menu'));
   expect(screen.queryByLabelText('Close menu')).not.toBeInTheDocument();
 });
+
+test('composer is enabled and shows the new placeholder before any chat is selected', async () => {
+  useAuthStore.setState({ user: _u, status: 'authed' });
+  render(<App />);
+
+  expect(await screen.findByText('Ask about a stock to start a new chat.')).toBeInTheDocument();
+  expect(screen.getByPlaceholderText('Ask about a stock…')).not.toBeDisabled();
+});
