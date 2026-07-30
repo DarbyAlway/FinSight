@@ -49,7 +49,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   send: async (content) => {
     if (!get().currentChatId) {
-      await get().newChat();
+      try {
+        await get().newChat();
+      } catch (err) {
+        set({ error: err instanceof Error ? err.message : String(err), status: 'error', stage: null });
+        return;
+      }
     }
     const id = get().currentChatId;
     if (!id) return;

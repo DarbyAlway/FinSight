@@ -15,6 +15,7 @@ vi.mock('../api/stream', () => ({
 
 import { useChatStore } from '../store/chatStore';
 import { sendMessage } from '../api/stream';
+import { createChat } from '../api/client';
 
 beforeEach(() => {
   useChatStore.setState({
@@ -55,4 +56,16 @@ test('send with no current chat creates one first, then sends to it', async () =
   expect(s.currentChatId).toBe('c1');
   expect(s.messages.map((m) => m.role)).toEqual(['user', 'assistant']);
   expect(s.status).toBe('idle');
+});
+
+test('send with no current chat sets error state if chat creation fails', async () => {
+  (createChat as any).mockImplementationOnce(async () => {
+    throw new Error('Network error');
+  });
+  useChatStore.setState({ currentChatId: null });
+  await useChatStore.getState().send('AAPL revenue?');
+  const s = useChatStore.getState();
+  expect(s.status).toBe('error');
+  expect(s.error).toContain('Network error');
+  expect(s.messages).toHaveLength(0);
 });
